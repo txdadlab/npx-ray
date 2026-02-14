@@ -193,4 +193,90 @@ const apiKey = process.env.API_KEY;
     assert.equal(result.passed, true);
     assert.equal(result.findings.length, 0, 'Test files should be excluded from scanning');
   });
+
+  it('should skip .d.ts declaration files', async () => {
+    const dir = join(tmpDir, 'declarations');
+    await fs.mkdir(join(dir, 'lib'), { recursive: true });
+
+    // TypeScript declaration files describe types, not runtime code
+    await fs.writeFile(join(dir, 'lib', 'dom.d.ts'), `
+interface XMLHttpRequest {
+  open(method: string, url: string): void;
+}
+declare function fetch(input: RequestInfo): Promise<Response>;
+declare function eval(x: string): any;
+`);
+    await fs.writeFile(join(dir, 'lib', 'index.d.mts'), `
+export declare function exec(command: string): void;
+`);
+
+    // A real .ts file should still be scanned
+    await fs.writeFile(join(dir, 'index.ts'), 'const x = 1;\n');
+
+    const result = await scanStatic(dir);
+
+    assert.equal(result.passed, true);
+    assert.equal(result.findings.length, 0, '.d.ts files should be excluded from scanning');
+  });
+
+  it('should downgrade eval() in string literals to info', async () => {
+    const dir = join(tmpDir, 'string-eval');
+    await fs.mkdir(dir, { recursive: true });
+
+    // Simulate a linter rule that references eval in a string
+    await fs.writeFile(join(dir, 'no-eval.js'), `
+const message = "Do not use eval() in your code";
+const pattern = 'eval(';
+const real = eval(code);
+`);
+
+    const result = await scanStatic(dir);
+
+    // The string references should be info, the real eval should be critical
+    const evalFindings = result.findings.filter(f => f.message.includes('eval()'));
+    const critical = evalFindings.filter(f => f.severity === 'critical');
+    const info = evalFindings.filter(f => f.severity === 'info');
+
+    assert.equal(critical.length, 1, 'Should have 1 critical eval (the real one)');
+    assert.ok(info.length >= 1, 'Should have at least 1 info eval (in string)');
+    assert.ok(info[0].message.includes('in string/comment'));
+  });
+
+  it('should downgrade patterns in single-line comments to info', async () => {
+    const dir = join(tmpDir, 'comment-eval');
+    await fs.mkdir(dir, { recursive: true });
+
+    await fs.writeFile(join(dir, 'rules.js'), `
+// Detect eval() usage in user code
+const x = 1;
+`);
+
+    const result = await scanStatic(dir);
+
+    const evalFindings = result.findings.filter(f => f.message.includes('eval()'));
+    assert.equal(evalFindings.length, 1, 'Should detect eval in comment');
+    assert.equal(evalFindings[0].severity, 'info', 'Comment eval should be info');
+    assert.ok(evalFindings[0].message.includes('in string/comment'));
+  });
+
+  it('should downgrade patterns in block comments (JSDoc) to info', async () => {
+    const dir = join(tmpDir, 'block-comment');
+    await fs.mkdir(dir, { recursive: true });
+
+    // Simulate ESLint's no-eval rule file with JSDoc mentioning eval()
+    await fs.writeFile(join(dir, 'no-eval.js'), `/**
+ * @fileoverview Rule to flag use of eval() statement
+ * @author Someone
+ */
+"use strict";
+const x = 1;
+`);
+
+    const result = await scanStatic(dir);
+
+    const evalFindings = result.findings.filter(f => f.message.includes('eval()'));
+    assert.equal(evalFindings.length, 1, 'Should detect eval in block comment');
+    assert.equal(evalFindings[0].severity, 'info', 'Block comment eval should be info');
+    assert.ok(evalFindings[0].message.includes('in string/comment'));
+  });
 });
