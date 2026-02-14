@@ -4,9 +4,8 @@
 
 A security scanner that audits source code, detects obfuscation, and flags supply chain risks -- all before you install. Downloads the tarball, runs 7 scanners in parallel, checks GitHub health, diffs source against the published package, and gives you a 0-100 risk score. No account required. Runs entirely locally.
 
-[![npm version](https://img.shields.io/npm/v/npx-ray)](https://www.npmjs.com/package/npx-ray)
-[![license](https://img.shields.io/npm/l/npx-ray)](https://github.com/txdadlab/npx-ray/blob/main/LICENSE)
-[![node](https://img.shields.io/node/v/npx-ray)](https://nodejs.org)
+[![license](https://img.shields.io/github/license/txdadlab/npx-ray)](https://github.com/txdadlab/npx-ray/blob/main/LICENSE)
+[![node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org)
 
 ---
 
