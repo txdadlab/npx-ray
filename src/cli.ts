@@ -31,6 +31,7 @@ import { scanSecrets } from './scanners/secrets.js';
 import { scanBinaries } from './scanners/binaries.js';
 import { scanDependencies } from './scanners/dependencies.js';
 import { scanTyposquatting } from './scanners/typosquatting.js';
+import { scanIoc } from './scanners/ioc.js';
 import { checkGitHubHealth } from './github.js';
 import { diffSource } from './diff.js';
 import { scanMcpConfigs } from './mcp.js';
@@ -83,6 +84,7 @@ async function scanPackage(
         scanBinaries(pkgDir),
         scanDependencies(pkgDir),
         scanTyposquatting(meta.name),
+        scanIoc(pkgDir),
       ]);
       scanSpinner.succeed('Security scans complete');
     } catch (err) {
