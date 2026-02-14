@@ -36,7 +36,7 @@ import { checkGitHubHealth } from './github.js';
 import { diffSource } from './diff.js';
 import { scanMcpConfigs } from './mcp.js';
 
-const VERSION = '1.0.0';
+const VERSION = '1.0.1';
 
 /**
  * Run the full scan pipeline for a single package.
