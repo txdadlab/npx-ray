@@ -223,6 +223,51 @@ console.log(msg);
     assert.equal(arrayFindings[0].severity, 'critical', 'Obfuscation string arrays should be critical');
   });
 
+  it('should not downgrade obfuscated files with _0x variable saturation', async () => {
+    const dir = join(tmpDir, 'obfuscated-vars');
+    await fs.mkdir(dir, { recursive: true });
+
+    // Create content with pervasive _0x variable naming (>20 occurrences)
+    // This has long lines + JS keywords (would look minified) BUT has _0x saturation
+    const obfVars = Array.from({ length: 30 }, (_, i) =>
+      `_0x${(0x1a00 + i).toString(16)}=0x${i.toString(16)}`
+    ).join(';');
+    const hexPart = '\\x68\\x65\\x6c\\x6c\\x6f\\x20\\x77\\x6f\\x72\\x6c\\x64';
+    const content = `function _0xabcd(){var ${obfVars};const _0xdead=_0xbeef;return _0x1a00;if(_0x1a01){while(true){}}};var s="${hexPart}${hexPart}${hexPart}${hexPart}";`;
+    await fs.writeFile(join(dir, 'obf.js'), content);
+
+    const result = await scanObfuscation(dir);
+
+    // Hex findings should be at warning level (not downgraded to info)
+    const hexFindings = result.findings.filter(f =>
+      f.message.includes('Hex-encoded')
+    );
+    assert.ok(hexFindings.length > 0, 'Should detect hex-encoded strings');
+    assert.equal(hexFindings[0].severity, 'warning',
+      '_0x-saturated files should NOT be treated as minified — hex findings should stay at warning');
+  });
+
+  it('should detect rotation pattern before the string array', async () => {
+    const dir = join(tmpDir, 'rotation-before');
+    await fs.mkdir(dir, { recursive: true });
+
+    // Simulate JavaScript Obfuscator output where the rotation IIFE comes BEFORE the array
+    const strings = Array.from({ length: 60 }, (_, i) =>
+      `"str${i}"`
+    ).join(',');
+    const code = `var _0xabc=function(){};(function(_0xa,_0xb){_0xa['push'](_0xa['shift']())})(_0xabc);\nvar _0x1234=[${strings}];\n`;
+    await fs.writeFile(join(dir, 'rotated.js'), code);
+
+    const result = await scanObfuscation(dir);
+
+    const arrayFindings = result.findings.filter(f =>
+      f.message.includes('string array') && f.message.includes('obfuscation')
+    );
+    assert.ok(arrayFindings.length > 0,
+      'Should detect obfuscation when rotation pattern appears BEFORE the array');
+    assert.equal(arrayFindings[0].severity, 'critical');
+  });
+
   it('should skip test files in test directories', async () => {
     const dir = join(tmpDir, 'with-tests');
     await fs.mkdir(join(dir, '__tests__'), { recursive: true });
