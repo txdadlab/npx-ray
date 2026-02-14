@@ -126,4 +126,110 @@ describe('IOC Scanner', () => {
     assert.equal(result.passed, true);
     assert.equal(result.findings.length, 0);
   });
+
+  // ── Deobfuscation tests ──────────────────────────────────────────
+
+  it('should detect URLs hidden in hex escapes', async () => {
+    const dir = join(tmpDir, 'hex');
+    await fs.mkdir(dir, { recursive: true });
+    // "https://evil.badsite.xyz/steal" as hex escapes
+    const hexUrl = Array.from(Buffer.from('https://evil.badsite.xyz/steal'))
+      .map(b => '\\x' + b.toString(16).padStart(2, '0'))
+      .join('');
+    await fs.writeFile(join(dir, 'mal.js'), `const c2 = "${hexUrl}";\n`);
+
+    const result = await scanIoc(dir);
+    assert.equal(result.findings.length, 1);
+    assert.ok(result.findings[0].message.includes('hex-decoded'));
+    assert.ok(result.findings[0].message.includes('hxxps[://]evil[.]badsite[.]xyz/steal'));
+    assert.equal(result.findings[0].severity, 'warning');
+    assert.ok(result.findings[0].evidence?.includes('hex obfuscation'));
+  });
+
+  it('should detect URLs hidden in unicode escapes', async () => {
+    const dir = join(tmpDir, 'unicode');
+    await fs.mkdir(dir, { recursive: true });
+    const unicodeUrl = Array.from('https://evil.badsite.xyz')
+      .map(c => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'))
+      .join('');
+    await fs.writeFile(join(dir, 'mal.js'), `const url = "${unicodeUrl}";\n`);
+
+    const result = await scanIoc(dir);
+    assert.equal(result.findings.length, 1);
+    assert.ok(result.findings[0].message.includes('unicode-decoded'));
+    assert.ok(result.findings[0].message.includes('hxxps[://]evil[.]badsite[.]xyz'));
+    assert.equal(result.findings[0].severity, 'warning');
+  });
+
+  it('should detect URLs hidden in String.fromCharCode', async () => {
+    const dir = join(tmpDir, 'charcode');
+    await fs.mkdir(dir, { recursive: true });
+    const codes = Array.from('https://evil.badsite.xyz/c2')
+      .map(c => c.charCodeAt(0))
+      .join(',');
+    await fs.writeFile(join(dir, 'mal.js'), `const url = String.fromCharCode(${codes});\n`);
+
+    const result = await scanIoc(dir);
+    assert.equal(result.findings.length, 1);
+    assert.ok(result.findings[0].message.includes('charcode-decoded'));
+    assert.ok(result.findings[0].message.includes('hxxps[://]evil[.]badsite[.]xyz/c2'));
+    assert.equal(result.findings[0].severity, 'warning');
+  });
+
+  it('should detect URLs hidden in base64', async () => {
+    const dir = join(tmpDir, 'b64');
+    await fs.mkdir(dir, { recursive: true });
+    const b64 = Buffer.from('https://evil.badsite.xyz/payload').toString('base64');
+    await fs.writeFile(join(dir, 'mal.js'), `const ep = atob("${b64}");\n`);
+
+    const result = await scanIoc(dir);
+    assert.equal(result.findings.length, 1);
+    assert.ok(result.findings[0].message.includes('base64-decoded'));
+    assert.ok(result.findings[0].message.includes('hxxps[://]evil[.]badsite[.]xyz/payload'));
+    assert.equal(result.findings[0].severity, 'warning');
+  });
+
+  it('should detect IPs hidden in hex escapes', async () => {
+    const dir = join(tmpDir, 'hexip');
+    await fs.mkdir(dir, { recursive: true });
+    const hexIp = Array.from(Buffer.from('45.33.32.156'))
+      .map(b => '\\x' + b.toString(16).padStart(2, '0'))
+      .join('');
+    await fs.writeFile(join(dir, 'mal.js'), `const srv = "${hexIp}";\n`);
+
+    const result = await scanIoc(dir);
+    assert.equal(result.findings.length, 1);
+    assert.ok(result.findings[0].message.includes('hex-decoded'));
+    assert.ok(result.findings[0].message.includes('45[.]33[.]32[.]156'));
+    assert.equal(result.findings[0].severity, 'warning');
+  });
+
+  it('should not flag base64 that decodes to non-URL content', async () => {
+    const dir = join(tmpDir, 'b64clean');
+    await fs.mkdir(dir, { recursive: true });
+    // "Hello World!!!!!" — no URL in decoded content
+    const b64 = Buffer.from('Hello World!!!!!').toString('base64');
+    await fs.writeFile(join(dir, 'clean.js'), `const msg = atob("${b64}");\n`);
+
+    const result = await scanIoc(dir);
+    assert.equal(result.findings.length, 0);
+  });
+
+  it('should deduplicate plaintext and decoded versions of same URL', async () => {
+    const dir = join(tmpDir, 'dedup-decode');
+    await fs.mkdir(dir, { recursive: true });
+    const hexUrl = Array.from(Buffer.from('https://evil.badsite.xyz/dup'))
+      .map(b => '\\x' + b.toString(16).padStart(2, '0'))
+      .join('');
+    await fs.writeFile(join(dir, 'mal.js'), [
+      `const a = "https://evil.badsite.xyz/dup";`,
+      `const b = "${hexUrl}";`,
+    ].join('\n'));
+
+    const result = await scanIoc(dir);
+    // Same URL — should be deduplicated to 1 finding
+    assert.equal(result.findings.length, 1);
+    // Plaintext found first, so should be 'info' not 'warning'
+    assert.equal(result.findings[0].severity, 'info');
+  });
 });

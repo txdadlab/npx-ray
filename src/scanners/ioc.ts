@@ -70,12 +70,16 @@ const IGNORED_IPS = new Set([
   '10.0.0.1',
 ]);
 
+/** Obfuscation decode method. */
+type DecodeMethod = 'hex' | 'unicode' | 'charcode' | 'base64';
+
 /** Tracked IOC with location info. */
 interface IocEntry {
   raw: string;
   defanged: string;
   type: 'url' | 'ipv4';
   files: Array<{ file: string; line: number }>;
+  decodedFrom?: DecodeMethod;
 }
 
 /**
@@ -147,8 +151,113 @@ function looksLikeVersion(str: string): boolean {
   return /^\d+\.\d+\.\d+\.\d+$/.test(str) && str.split('.').some(n => parseInt(n) > 255);
 }
 
+// ── Deobfuscation ──────────────────────────────────────────────────
+
+/** Matches sequences of 4+ hex escapes: \x68\x74\x74\x70 */
+const HEX_ESCAPE_SEQ = /(?:\\x[0-9a-fA-F]{2}){4,}/g;
+
+/** Matches sequences of 4+ unicode escapes: \u0068\u0074\u0074\u0070 */
+const UNICODE_ESCAPE_SEQ = /(?:\\u[0-9a-fA-F]{4}){4,}/g;
+
+/** Matches String.fromCharCode(104,116,116,112,...) */
+const CHAR_CODE_PATTERN = /String\.fromCharCode\s*\(\s*([0-9][0-9,\s]*)\)/gi;
+
+/** Matches base64 blobs ≥ 20 chars (decodes to ≥ 15 bytes). */
+const BASE64_BLOB_PATTERN = /(?:[A-Za-z0-9+/]{4}){5,}(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?/g;
+
+interface DecodedFragment {
+  text: string;
+  method: DecodeMethod;
+}
+
+function decodeHexEscapes(encoded: string): string {
+  return encoded.replace(/\\x([0-9a-fA-F]{2})/g, (_, hex) =>
+    String.fromCharCode(parseInt(hex, 16)),
+  );
+}
+
+function decodeUnicodeEscapes(encoded: string): string {
+  return encoded.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) =>
+    String.fromCharCode(parseInt(hex, 16)),
+  );
+}
+
+function decodeCharCodes(codeList: string): string {
+  const codes = codeList.split(',').map(s => parseInt(s.trim()));
+  if (codes.some(n => isNaN(n) || n < 0 || n > 0x10ffff)) return '';
+  try {
+    return String.fromCharCode(...codes);
+  } catch {
+    return '';
+  }
+}
+
+function tryDecodeBase64(encoded: string): string {
+  try {
+    const decoded = Buffer.from(encoded, 'base64').toString('utf-8');
+    // Only accept if mostly printable ASCII (URLs are ASCII)
+    const printable = decoded.replace(/[^\x20-\x7e]/g, '');
+    if (printable.length / decoded.length > 0.8 && decoded.length >= 6) {
+      return decoded;
+    }
+    return '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Attempt to decode obfuscated content in a line and return decoded fragments.
+ */
+function extractDecodedFragments(line: string): DecodedFragment[] {
+  const fragments: DecodedFragment[] = [];
+  let m: RegExpExecArray | null;
+
+  // Hex escapes
+  HEX_ESCAPE_SEQ.lastIndex = 0;
+  while ((m = HEX_ESCAPE_SEQ.exec(line)) !== null) {
+    const decoded = decodeHexEscapes(m[0]);
+    if (decoded.length >= 4) {
+      fragments.push({ text: decoded, method: 'hex' });
+    }
+  }
+
+  // Unicode escapes
+  UNICODE_ESCAPE_SEQ.lastIndex = 0;
+  while ((m = UNICODE_ESCAPE_SEQ.exec(line)) !== null) {
+    const decoded = decodeUnicodeEscapes(m[0]);
+    if (decoded.length >= 4) {
+      fragments.push({ text: decoded, method: 'unicode' });
+    }
+  }
+
+  // String.fromCharCode
+  CHAR_CODE_PATTERN.lastIndex = 0;
+  while ((m = CHAR_CODE_PATTERN.exec(line)) !== null) {
+    const decoded = decodeCharCodes(m[1]);
+    if (decoded.length >= 4) {
+      fragments.push({ text: decoded, method: 'charcode' });
+    }
+  }
+
+  // Base64 blobs
+  BASE64_BLOB_PATTERN.lastIndex = 0;
+  while ((m = BASE64_BLOB_PATTERN.exec(line)) !== null) {
+    const decoded = tryDecodeBase64(m[0]);
+    if (decoded) {
+      fragments.push({ text: decoded, method: 'base64' });
+    }
+  }
+
+  return fragments;
+}
+
+// ── Main scanner ───────────────────────────────────────────────────
+
 /**
  * Scan all files in a package directory for URLs and IP addresses.
+ * Includes a deobfuscation layer that decodes hex escapes, unicode
+ * escapes, String.fromCharCode, and base64 before scanning.
  * Returns them in defanged format.
  */
 export async function scanIoc(pkgDir: string): Promise<ScannerResult> {
@@ -238,6 +347,56 @@ export async function scanIoc(pkgDir: string): Promise<ScannerResult> {
           entry.files.push({ file: relPath, line: i + 1 });
         }
       }
+
+      // Deobfuscation pass — decode hex/unicode/charcode/base64 and re-scan
+      const fragments = extractDecodedFragments(line);
+      for (const frag of fragments) {
+        // Scan decoded fragment for URLs
+        URL_PATTERN.lastIndex = 0;
+        while ((match = URL_PATTERN.exec(frag.text)) !== null) {
+          const raw = match[0].replace(/[.),'";]+$/, '');
+          const domain = extractDomain(raw);
+          if (IGNORED_DOMAINS.some(d => domain === d || domain.endsWith('.' + d))) continue;
+
+          const key = raw.toLowerCase();
+          if (!iocMap.has(key)) {
+            iocMap.set(key, {
+              raw,
+              defanged: defangUrl(raw),
+              type: 'url',
+              files: [],
+              decodedFrom: frag.method,
+            });
+          }
+          const entry = iocMap.get(key)!;
+          if (entry.files.length < 5) {
+            entry.files.push({ file: relPath, line: i + 1 });
+          }
+        }
+
+        // Scan decoded fragment for IPs
+        IPV4_PATTERN.lastIndex = 0;
+        while ((match = IPV4_PATTERN.exec(frag.text)) !== null) {
+          const raw = match[0];
+          if (IGNORED_IPS.has(raw)) continue;
+          if (looksLikeVersion(raw)) continue;
+
+          const key = raw;
+          if (!iocMap.has(key)) {
+            iocMap.set(key, {
+              raw,
+              defanged: defangIp(raw),
+              type: 'ipv4',
+              files: [],
+              decodedFrom: frag.method,
+            });
+          }
+          const entry = iocMap.get(key)!;
+          if (entry.files.length < 5) {
+            entry.files.push({ file: relPath, line: i + 1 });
+          }
+        }
+      }
     }
   }
 
@@ -247,29 +406,37 @@ export async function scanIoc(pkgDir: string): Promise<ScannerResult> {
 
   for (const ioc of urls) {
     const firstLoc = ioc.files[0];
+    const label = ioc.decodedFrom
+      ? `URL (${ioc.decodedFrom}-decoded)`
+      : 'URL';
+    const evidenceParts: string[] = [];
+    if (ioc.decodedFrom) evidenceParts.push(`Decoded from ${ioc.decodedFrom} obfuscation`);
+    if (ioc.files.length > 1) evidenceParts.push(`Found in ${ioc.files.length} location(s)`);
     findings.push({
       scanner: SCANNER_NAME,
-      severity: 'info',
-      message: `URL: ${ioc.defanged}`,
+      severity: ioc.decodedFrom ? 'warning' : 'info',
+      message: `${label}: ${ioc.defanged}`,
       file: firstLoc?.file,
       line: firstLoc?.line,
-      evidence: ioc.files.length > 1
-        ? `Found in ${ioc.files.length} location(s)`
-        : undefined,
+      evidence: evidenceParts.length > 0 ? evidenceParts.join('; ') : undefined,
     });
   }
 
   for (const ioc of ips) {
     const firstLoc = ioc.files[0];
+    const label = ioc.decodedFrom
+      ? `IP (${ioc.decodedFrom}-decoded)`
+      : 'IP';
+    const evidenceParts: string[] = [];
+    if (ioc.decodedFrom) evidenceParts.push(`Decoded from ${ioc.decodedFrom} obfuscation`);
+    if (ioc.files.length > 1) evidenceParts.push(`Found in ${ioc.files.length} location(s)`);
     findings.push({
       scanner: SCANNER_NAME,
-      severity: 'info',
-      message: `IP: ${ioc.defanged}`,
+      severity: ioc.decodedFrom ? 'warning' : 'info',
+      message: `${label}: ${ioc.defanged}`,
       file: firstLoc?.file,
       line: firstLoc?.line,
-      evidence: ioc.files.length > 1
-        ? `Found in ${ioc.files.length} location(s)`
-        : undefined,
+      evidence: evidenceParts.length > 0 ? evidenceParts.join('; ') : undefined,
     });
   }
 
