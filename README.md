@@ -2,7 +2,7 @@
 
 **X-ray vision for npm packages.**
 
-A security scanner that audits source code, detects obfuscation, and flags supply chain risks -- all before you install. Downloads the tarball, runs 7 scanners in parallel, checks GitHub health, diffs source against the published package, and gives you a 0-100 risk score. No account required. Runs entirely locally.
+A security scanner that audits source code, detects obfuscation, and flags supply chain risks -- all before you install. Downloads the tarball, runs 8 scanners in parallel, checks GitHub health, diffs source against the published package, and gives you a 0-100 risk score. No account required. Runs entirely locally.
 
 [![license](https://img.shields.io/github/license/txdadlab/npx-ray)](https://github.com/txdadlab/npx-ray/blob/main/LICENSE)
 [![node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org)
@@ -85,7 +85,25 @@ Scan completed in 3.2s
 | **Typosquatting** | Package names within 1-2 edits of popular packages (Levenshtein distance) | Critical / Warning |
 | **GitHub Health** | Stars, forks, archive status, repo age, publisher-vs-owner mismatch | Scoring adjustment |
 | **Source Diff** | Files in npm but not in GitHub repo, content hash mismatches between published and source | Scoring adjustment |
+| **IOC Extraction** | URLs and IP addresses extracted and defanged for safe review; decodes hex escapes, unicode escapes, `String.fromCharCode()`, and base64 | Warning (decoded) / Info (plaintext) |
 | **MCP Servers** | Unpinned MCP server versions in editor configs, tool description injection risks | Via `--mcp` flag |
+
+---
+
+## Limitations
+
+npx-ray is a **static analysis** tool. It does not execute any code from scanned packages. This means there are classes of threats it cannot fully detect:
+
+- **Cross-file obfuscation** -- A payload split across multiple files (e.g., encrypted blob in `data.js` with the decryption key in `utils.js`) cannot be reassembled by static analysis. The obfuscation scanner will flag the suspicious patterns, but the IOC scanner cannot extract the hidden URL.
+- **Key-based encoding** -- XOR ciphers, custom lookup tables, or any encoding that requires a runtime key to decode. npx-ray can decode self-contained encodings (hex, unicode, base64, charCode) but not schemes that depend on external keys or functions.
+- **Runtime string construction** -- Patterns like `arr[3] + arr[7] + arr[1]` where array elements are defined elsewhere, or template literals assembled from variables across scopes.
+- **Multi-stage deobfuscation** -- Pipelines like base64 decode -> XOR -> URL, where the output of one decoding step feeds into another that requires context.
+- **Novel or custom obfuscation** -- Obfuscation techniques not covered by the built-in pattern library. The entropy scanner provides a general safety net (obfuscated code tends to have high Shannon entropy), but purpose-built obfuscators can evade specific signature checks.
+- **Native binary analysis** -- `.node`, `.so`, `.dll`, and `.wasm` files are flagged as unreviable but their contents are not analyzed.
+
+**What this means in practice:** npx-ray catches the majority of real-world supply chain attacks, which overwhelmingly rely on plaintext or simple single-layer obfuscation. Sophisticated multi-file encrypted payloads exist but are rare in npm malware. When npx-ray encounters obfuscation it can't decode, the obfuscation scanner still flags the suspicious patterns -- you just won't see the decoded IOC.
+
+For defense-in-depth, combine npx-ray with runtime monitoring, sandboxed installs, and lockfile auditing.
 
 ---
 
@@ -260,7 +278,7 @@ The `--json` flag outputs a structured report that can be parsed by downstream t
 
 1. **Fetch metadata** from the npm registry (version, tarball URL, publisher, dependencies)
 2. **Download and extract** the tarball to a temporary directory -- nothing is installed, no scripts run
-3. **Run 7 scanners in parallel** against the extracted source code:
+3. **Run 8 scanners in parallel** against the extracted source code:
    - Static analysis (dangerous API patterns)
    - Obfuscation detection (entropy, hex, base64, string arrays)
    - Lifecycle hooks (install scripts)
@@ -268,6 +286,7 @@ The `--json` flag outputs a structured report that can be parsed by downstream t
    - Binaries (non-reviewable native addons)
    - Dependency analysis (bloat, wildcards, git URLs)
    - Typosquatting (Levenshtein distance against top npm packages)
+   - IOC extraction (URLs and IPs, with deobfuscation layer)
 4. **Check GitHub health** via the unauthenticated API (stars, age, archive status, publisher match)
 5. **Diff source vs. published** by downloading the GitHub repo tarball and comparing file lists and content hashes
 6. **Calculate score** using weighted category deductions
