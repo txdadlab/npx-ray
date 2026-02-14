@@ -53,15 +53,15 @@ const PATTERNS: Pattern[] = [
   // exec() is checked separately to avoid matching execSync/execFile and regex .exec()
   { regex: /(?<!\.)(?<!\w)exec\s*\(/, severity: 'critical', message: 'exec() — shell command execution', cliExpected: true, checkStringContext: true },
 
-  // Network calls (warning)
-  { regex: /\bfetch\s*\(/, severity: 'warning', message: 'fetch() — network request', checkStringContext: true },
-  { regex: /\bhttp\.request\b/, severity: 'warning', message: 'http.request — network request' },
-  { regex: /\bhttps\.request\b/, severity: 'warning', message: 'https.request — network request' },
+  // Network calls (warning, but expected for CLI tools that fetch updates/plugins)
+  { regex: /\bfetch\s*\(/, severity: 'warning', message: 'fetch() — network request', checkStringContext: true, cliExpected: true },
+  { regex: /\bhttp\.request\b/, severity: 'warning', message: 'http.request — network request', cliExpected: true },
+  { regex: /\bhttps\.request\b/, severity: 'warning', message: 'https.request — network request', cliExpected: true },
   { regex: /\bXMLHttpRequest\b/, severity: 'warning', message: 'XMLHttpRequest — network request' },
-  { regex: /\baxios\b/, severity: 'warning', message: 'axios — HTTP client' },
-  { regex: /\bgot\s*\(/, severity: 'warning', message: 'got() — HTTP client', checkStringContext: true },
-  { regex: /\bnode-fetch\b/, severity: 'warning', message: 'node-fetch — HTTP client' },
-  { regex: /\bundici\b/, severity: 'warning', message: 'undici — HTTP client' },
+  { regex: /\baxios\b/, severity: 'warning', message: 'axios — HTTP client', cliExpected: true },
+  { regex: /\bgot\s*\(/, severity: 'warning', message: 'got() — HTTP client', checkStringContext: true, cliExpected: true },
+  { regex: /\bnode-fetch\b/, severity: 'warning', message: 'node-fetch — HTTP client', cliExpected: true },
+  { regex: /\bundici\b/, severity: 'warning', message: 'undici — HTTP client', cliExpected: true },
 
   // Dynamic requires (warning, but expected for CLI tools that load plugins/configs)
   { regex: /\brequire\s*\(\s*[^'"`\s]/, severity: 'warning', message: 'Dynamic require() — variable module path', checkStringContext: true, cliExpected: true },

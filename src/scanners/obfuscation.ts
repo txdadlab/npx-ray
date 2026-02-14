@@ -30,23 +30,20 @@ function isTestFile(relPath: string): boolean {
 }
 
 /**
- * Heuristic: does the file look like minified (not obfuscated) code?
- * Minified code has long lines and retains JS keywords but lacks heavy hex escapes.
+ * Heuristic: does the file look like minified or bundled code?
+ * Bundled/minified code has long lines and retains JS keywords.
+ * Bundled parsers may also contain hex-encoded character tables —
+ * that doesn't make them obfuscated. Obfuscation is detected separately
+ * via string array rotation patterns.
  */
 function looksMinified(content: string): boolean {
   const lines = content.split('\n');
   const hasLongLines = lines.some(l => l.length > 500);
   if (!hasLongLines) return false;
 
-  // Check for JS keywords that survive minification
+  // Check for JS keywords that survive minification/bundling
   const jsKeywords = /\b(function|return|var|let|const|if|else|for|while|class|export|import|typeof|instanceof)\b/;
-  const hasKeywords = jsKeywords.test(content);
-
-  // Check for heavy hex escapes (obfuscation indicator)
-  const hexMatches = content.match(/(\\x[0-9a-fA-F]{2}){4,}/g);
-  const heavyHex = hexMatches !== null && hexMatches.length > 5;
-
-  return hasKeywords && !heavyHex;
+  return jsKeywords.test(content);
 }
 
 /** Minimum file size to run entropy analysis (skip tiny files). */
