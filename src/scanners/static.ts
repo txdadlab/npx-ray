@@ -15,6 +15,17 @@ const SCANNER_NAME = 'static';
 /** Extensions to scan. */
 const CODE_EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.ts']);
 
+/** Test file/directory patterns to skip — these are not runtime code. */
+const TEST_DIR_SEGMENTS = ['__tests__', 'tests', 'test', 'fixtures', '__fixtures__', '__mocks__'];
+
+function isTestFile(relPath: string): boolean {
+  const segments = relPath.split(/[\\/]/);
+  if (segments.some(s => TEST_DIR_SEGMENTS.includes(s))) return true;
+  const filename = segments[segments.length - 1];
+  if (/\.(test|spec)\.[cm]?[jt]sx?$/.test(filename)) return true;
+  return false;
+}
+
 /** Patterns to detect, grouped by category. */
 interface Pattern {
   regex: RegExp;
@@ -90,9 +101,10 @@ async function collectSourceFiles(dir: string): Promise<string[]> {
     const parentPath = (entry as any).parentPath ?? (entry as any).path ?? dir;
     const fullPath = join(parentPath, entry.name);
 
-    // Skip node_modules
+    // Skip node_modules and test files
     const relPath = relative(dir, fullPath);
     if (relPath.includes('node_modules')) continue;
+    if (isTestFile(relPath)) continue;
 
     files.push(fullPath);
   }

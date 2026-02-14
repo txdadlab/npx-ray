@@ -14,9 +14,40 @@ const SCANNER_NAME = 'obfuscation';
 /** Extensions to scan. */
 const CODE_EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.ts']);
 
-/** Shannon entropy thresholds. Normal JS: 4.0-5.5. */
-const ENTROPY_WARNING = 5.8;
-const ENTROPY_CRITICAL = 6.5;
+/** Shannon entropy thresholds. Normal JS: 4.0-5.5, minified: 5.5-6.2. */
+const ENTROPY_WARNING = 6.2;
+const ENTROPY_CRITICAL = 6.8;
+
+/** Test file/directory patterns to skip — these are not runtime code. */
+const TEST_DIR_SEGMENTS = ['__tests__', 'tests', 'test', 'fixtures', '__fixtures__', '__mocks__'];
+
+function isTestFile(relPath: string): boolean {
+  const segments = relPath.split(/[\\/]/);
+  if (segments.some(s => TEST_DIR_SEGMENTS.includes(s))) return true;
+  const filename = segments[segments.length - 1];
+  if (/\.(test|spec)\.[cm]?[jt]sx?$/.test(filename)) return true;
+  return false;
+}
+
+/**
+ * Heuristic: does the file look like minified (not obfuscated) code?
+ * Minified code has long lines and retains JS keywords but lacks heavy hex escapes.
+ */
+function looksMinified(content: string): boolean {
+  const lines = content.split('\n');
+  const hasLongLines = lines.some(l => l.length > 500);
+  if (!hasLongLines) return false;
+
+  // Check for JS keywords that survive minification
+  const jsKeywords = /\b(function|return|var|let|const|if|else|for|while|class|export|import|typeof|instanceof)\b/;
+  const hasKeywords = jsKeywords.test(content);
+
+  // Check for heavy hex escapes (obfuscation indicator)
+  const hexMatches = content.match(/(\\x[0-9a-fA-F]{2}){4,}/g);
+  const heavyHex = hexMatches !== null && hexMatches.length > 5;
+
+  return hasKeywords && !heavyHex;
+}
 
 /** Minimum file size to run entropy analysis (skip tiny files). */
 const MIN_ENTROPY_SIZE = 256;
@@ -28,15 +59,26 @@ const HEX_PATTERN = /(\\x[0-9a-fA-F]{2}){4,}/;
 const BASE64_PATTERN = /[A-Za-z0-9+/=]{500,}/;
 
 /**
- * Detect large string arrays (>50 elements) — common obfuscation pattern.
- * Uses simple counting instead of regex to avoid catastrophic backtracking.
+ * Result from large string array detection.
+ * - 'obfuscated': array looks like obfuscation (short/encoded strings, rotation pattern)
+ * - 'data': array is a data table (readable strings like keywords, identifiers)
+ * - false: no large string array found
  */
-function hasLargeStringArray(content: string): boolean {
-  // Find array openings and count consecutive quoted string elements
+type StringArrayResult = 'obfuscated' | 'data' | false;
+
+/**
+ * Detect large string arrays (>50 elements) and classify them.
+ *
+ * Obfuscation arrays have short/encoded strings and often a rotation function.
+ * Data tables in bundled code have readable strings (keywords, identifiers, etc.).
+ */
+function detectLargeStringArray(content: string): StringArrayResult {
+  let found: StringArrayResult = false;
+
   let i = 0;
   while (i < content.length) {
     if (content[i] === '[') {
-      let count = 0;
+      const strings: string[] = [];
       let j = i + 1;
       while (j < content.length && content[j] !== ']') {
         // Skip whitespace
@@ -44,24 +86,82 @@ function hasLargeStringArray(content: string): boolean {
         // Check for quoted string
         const q = content[j];
         if (q === '"' || q === "'" || q === '`') {
+          const start = j + 1;
           j++;
           while (j < content.length && content[j] !== q) {
             if (content[j] === '\\') j++; // skip escaped chars
             j++;
           }
-          if (j < content.length) j++; // skip closing quote
-          count++;
+          if (j < content.length) {
+            // Collect up to 60 strings for analysis
+            if (strings.length < 60) {
+              strings.push(content.slice(start, j));
+            }
+            j++; // skip closing quote
+          }
           // Skip whitespace and comma
           while (j < content.length && /[\s,]/.test(content[j])) j++;
         } else {
           break; // not a string element, stop counting
         }
-        if (count > 50) return true;
+        if (strings.length > 50 && found === false) {
+          // Classify this array
+          found = classifyStringArray(strings, content, i, j);
+        }
       }
+      // Final check if we exited the loop exactly at 50
+      if (strings.length > 50 && found === false) {
+        found = classifyStringArray(strings, content, i, j);
+      }
+      // If we found obfuscation, return immediately
+      if (found === 'obfuscated') return 'obfuscated';
     }
     i++;
   }
-  return false;
+  return found;
+}
+
+/**
+ * Classify a large string array as obfuscation or data table.
+ */
+function classifyStringArray(
+  strings: string[],
+  content: string,
+  arrayStart: number,
+  arrayEnd: number,
+): StringArrayResult {
+  // Check for rotation pattern near the array (push + shift = obfuscation)
+  const windowAfter = content.slice(arrayEnd, arrayEnd + 500);
+  const hasRotation = /\.\s*push\s*\(/.test(windowAfter) && /\.\s*shift\s*\(/.test(windowAfter);
+
+  // Check for obfuscator-style variable name (_0x...) before the array
+  const windowBefore = content.slice(Math.max(0, arrayStart - 50), arrayStart);
+  const hasObfuscatorVar = /_0x[0-9a-fA-F]+\s*=\s*$/.test(windowBefore);
+
+  // If rotation + obfuscator var name, definitely obfuscation
+  if (hasRotation && hasObfuscatorVar) return 'obfuscated';
+
+  // Check string content readability
+  const avgLen = strings.reduce((sum, s) => sum + s.length, 0) / strings.length;
+
+  // Readable: string contains at least one letter and no hex/unicode escape sequences
+  const readableCount = strings.filter(s =>
+    /[a-zA-Z]/.test(s) && !/(\\x[0-9a-fA-F]{2}){2,}/.test(s) && !/(\\u[0-9a-fA-F]{4}){2,}/.test(s)
+  ).length;
+  const readableRatio = readableCount / strings.length;
+
+  // If rotation pattern present, it's obfuscation regardless of readability
+  if (hasRotation) return 'obfuscated';
+
+  // Data tables: strings are partially readable and reasonably sized.
+  // Bundled parsers/compilers often have arrays mixing keywords with short
+  // symbol tokens, so a moderate readability threshold (>=30%) is appropriate.
+  if (readableRatio >= 0.3 && avgLen >= 2) return 'data';
+
+  // No rotation + very low readability — still suspicious but without
+  // the rotation pattern it's not classic obfuscation. Treat as data.
+  // (The entropy scanner will catch truly obfuscated content separately.)
+  return 'data';
 }
 
 /** Lines >1000 characters. */
@@ -108,6 +208,7 @@ async function collectSourceFiles(dir: string): Promise<string[]> {
     const fullPath = join(parentPath, entry.name);
     const relPath = relative(dir, fullPath);
     if (relPath.includes('node_modules')) continue;
+    if (isTestFile(relPath)) continue;
 
     files.push(fullPath);
   }
@@ -146,19 +247,25 @@ export async function scanObfuscation(pkgDir: string): Promise<ScannerResult> {
     // Shannon entropy check (whole file)
     if (content.length >= MIN_ENTROPY_SIZE) {
       const entropy = shannonEntropy(content);
+      const minified = looksMinified(content);
+
       if (entropy >= ENTROPY_CRITICAL) {
         findings.push({
           scanner: SCANNER_NAME,
-          severity: 'critical',
-          message: `Very high Shannon entropy: ${entropy.toFixed(2)} (threshold: ${ENTROPY_CRITICAL}) — likely obfuscated`,
+          severity: minified ? 'info' : 'critical',
+          message: minified
+            ? `High Shannon entropy: ${entropy.toFixed(2)} (threshold: ${ENTROPY_CRITICAL}) — appears to be minified code`
+            : `Very high Shannon entropy: ${entropy.toFixed(2)} (threshold: ${ENTROPY_CRITICAL}) — likely obfuscated`,
           file: relPath,
           evidence: `File entropy: ${entropy.toFixed(2)} bits/char`,
         });
       } else if (entropy >= ENTROPY_WARNING) {
         findings.push({
           scanner: SCANNER_NAME,
-          severity: 'warning',
-          message: `Elevated Shannon entropy: ${entropy.toFixed(2)} (threshold: ${ENTROPY_WARNING}) — possible obfuscation`,
+          severity: minified ? 'info' : 'warning',
+          message: minified
+            ? `Elevated Shannon entropy: ${entropy.toFixed(2)} (threshold: ${ENTROPY_WARNING}) — appears to be minified code`
+            : `Elevated Shannon entropy: ${entropy.toFixed(2)} (threshold: ${ENTROPY_WARNING}) — possible obfuscation`,
           file: relPath,
           evidence: `File entropy: ${entropy.toFixed(2)} bits/char`,
         });
@@ -206,14 +313,23 @@ export async function scanObfuscation(pkgDir: string): Promise<ScannerResult> {
       }
     }
 
-    // String array rotation (check whole file content)
-    if (hasLargeStringArray(content)) {
+    // Large string array detection (check whole file content)
+    const arrayResult = detectLargeStringArray(content);
+    if (arrayResult === 'obfuscated') {
       findings.push({
         scanner: SCANNER_NAME,
         severity: 'critical',
-        message: 'Large string array (>50 elements) — common obfuscation pattern',
+        message: 'Large string array (>50 elements) with obfuscation markers',
         file: relPath,
-        evidence: 'String array with 50+ elements detected',
+        evidence: 'String array with 50+ elements and rotation/encoding detected',
+      });
+    } else if (arrayResult === 'data') {
+      findings.push({
+        scanner: SCANNER_NAME,
+        severity: 'info',
+        message: 'Large string array (>50 elements) — appears to be a data table',
+        file: relPath,
+        evidence: 'String array with 50+ readable elements (keywords, identifiers, etc.)',
       });
     }
   }

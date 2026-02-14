@@ -65,6 +65,8 @@ export interface PackageMetadata {
   scripts: Record<string, string>;
   /** All maintainers. */
   maintainers: Array<{ name: string; email?: string }>;
+  /** Trusted publisher info (npm provenance via OIDC). Undefined if not present. */
+  trustedPublisher?: { id: string };
 }
 
 /** GitHub repository health info. */

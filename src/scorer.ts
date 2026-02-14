@@ -5,7 +5,7 @@
  * a letter grade, and a human-readable verdict.
  */
 
-import type { ScannerResult, GitHubHealth, DiffResult } from './types.js';
+import type { ScannerResult, GitHubHealth, DiffResult, PackageMetadata } from './types.js';
 
 export interface ScoreResult {
   /** Aggregate risk score (0 = dangerous, 100 = clean). */
@@ -40,6 +40,10 @@ const CATEGORY_WEIGHTS: Record<string, CategoryConfig> = {
 /**
  * Score a single scanner category by deducting from max points based on
  * the severity of each finding.
+ *
+ * Uses diminishing returns: deduction = base * (1 + ln(count))
+ * so many findings still hurt, but don't instantly zero out the category.
+ * A single finding deducts the base amount (ln(1) = 0).
  */
 function scoreCategory(result: ScannerResult): number {
   const config = CATEGORY_WEIGHTS[result.name];
@@ -48,21 +52,29 @@ function scoreCategory(result: ScannerResult): number {
     return 0;
   }
 
-  let points = config.maxPoints;
+  // Count findings by severity
+  let criticalCount = 0;
+  let warningCount = 0;
+  let infoCount = 0;
 
   for (const finding of result.findings) {
     switch (finding.severity) {
-      case 'critical':
-        points -= config.criticalDeduction;
-        break;
-      case 'warning':
-        points -= config.warningDeduction;
-        break;
-      case 'info':
-        points -= config.infoDeduction;
-        break;
+      case 'critical': criticalCount++; break;
+      case 'warning': warningCount++; break;
+      case 'info': infoCount++; break;
     }
   }
+
+  // Diminishing returns: base * (1 + ln(count))
+  function diminishing(base: number, count: number): number {
+    if (count === 0) return 0;
+    return base * (1 + Math.log(count));
+  }
+
+  let points = config.maxPoints;
+  points -= diminishing(config.criticalDeduction, criticalCount);
+  points -= diminishing(config.warningDeduction, warningCount);
+  points -= diminishing(config.infoDeduction, infoCount);
 
   return Math.max(0, points);
 }
@@ -70,8 +82,11 @@ function scoreCategory(result: ScannerResult): number {
 /**
  * Score GitHub repository health.
  * Max 15 points. Returns 0 if no repo found.
+ *
+ * @param github - GitHub health data.
+ * @param hasProvenance - Whether the package has npm trusted publisher provenance.
  */
-function scoreGitHub(github?: GitHubHealth): number {
+function scoreGitHub(github?: GitHubHealth, hasProvenance?: boolean): number {
   if (!github || !github.found) {
     return 0;
   }
@@ -95,7 +110,16 @@ function scoreGitHub(github?: GitHubHealth): number {
   }
 
   if (!github.publisherMatchesOwner) {
-    points -= 10;
+    if (hasProvenance) {
+      // Trusted publisher (OIDC provenance) fully explains the mismatch —
+      // CI published the package, not a human. No penalty.
+      points -= 0;
+    } else if (github.stars >= 100) {
+      // Popular repos with publisher mismatch are less suspicious
+      points -= 3;
+    } else {
+      points -= 10;
+    }
   }
 
   return Math.max(0, points);
@@ -112,7 +136,12 @@ function scoreDiff(diff?: DiffResult): number {
 
   let points = 10;
 
-  points -= 5 * diff.unexpectedFiles.length;
+  // Diminishing returns: min(8, 3 * (1 + ln(count)))
+  // 1 file = -3, 2 = -4, 5 = -6, 35 = -8 (capped)
+  const count = diff.unexpectedFiles.length;
+  if (count > 0) {
+    points -= Math.min(8, 3 * (1 + Math.log(count)));
+  }
 
   return Math.max(0, points);
 }
@@ -155,12 +184,14 @@ function toVerdict(grade: string): string {
  * @param scanners - Results from all scanners.
  * @param github   - GitHub health data (optional).
  * @param diff     - Source diff data (optional).
+ * @param meta     - Package metadata (optional, used for provenance).
  * @returns Score (0-100), letter grade, and verdict.
  */
 export function calculateScore(
   scanners: ScannerResult[],
   github?: GitHubHealth,
   diff?: DiffResult,
+  meta?: PackageMetadata,
 ): ScoreResult {
   let total = 0;
 
@@ -170,7 +201,8 @@ export function calculateScore(
   }
 
   // Add GitHub health score (0-15 pts)
-  total += scoreGitHub(github);
+  const hasProvenance = meta?.trustedPublisher !== undefined;
+  total += scoreGitHub(github, hasProvenance);
 
   // Add diff score (0-10 pts)
   total += scoreDiff(diff);
