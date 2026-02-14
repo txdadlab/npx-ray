@@ -10,7 +10,8 @@ import { Command } from 'commander';
 import ora from 'ora';
 import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import type {
   ScanReport,
@@ -36,7 +37,10 @@ import { checkGitHubHealth } from './github.js';
 import { diffSource } from './diff.js';
 import { scanMcpConfigs } from './mcp.js';
 
-const VERSION = '1.0.1';
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const VERSION = JSON.parse(
+  await fs.readFile(join(__dirname, '..', 'package.json'), 'utf-8'),
+).version as string;
 
 /**
  * Run the full scan pipeline for a single package.
