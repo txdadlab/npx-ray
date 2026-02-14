@@ -25,10 +25,44 @@ const MIN_ENTROPY_SIZE = 256;
 const HEX_PATTERN = /(\\x[0-9a-fA-F]{2}){4,}/;
 
 /** Base64 string longer than 500 chars. */
-const BASE64_PATTERN = /['"`]([A-Za-z0-9+/=]{500,})['"`]/;
+const BASE64_PATTERN = /[A-Za-z0-9+/=]{500,}/;
 
-/** Large string array with >50 elements (common obfuscation pattern). */
-const STRING_ARRAY_PATTERN = /\[(?:\s*(['"`]).*?\1\s*,\s*){50,}/;
+/**
+ * Detect large string arrays (>50 elements) — common obfuscation pattern.
+ * Uses simple counting instead of regex to avoid catastrophic backtracking.
+ */
+function hasLargeStringArray(content: string): boolean {
+  // Find array openings and count consecutive quoted string elements
+  let i = 0;
+  while (i < content.length) {
+    if (content[i] === '[') {
+      let count = 0;
+      let j = i + 1;
+      while (j < content.length && content[j] !== ']') {
+        // Skip whitespace
+        while (j < content.length && /\s/.test(content[j])) j++;
+        // Check for quoted string
+        const q = content[j];
+        if (q === '"' || q === "'" || q === '`') {
+          j++;
+          while (j < content.length && content[j] !== q) {
+            if (content[j] === '\\') j++; // skip escaped chars
+            j++;
+          }
+          if (j < content.length) j++; // skip closing quote
+          count++;
+          // Skip whitespace and comma
+          while (j < content.length && /[\s,]/.test(content[j])) j++;
+        } else {
+          break; // not a string element, stop counting
+        }
+        if (count > 50) return true;
+      }
+    }
+    i++;
+  }
+  return false;
+}
 
 /** Lines >1000 characters. */
 const LONG_LINE_THRESHOLD = 1000;
@@ -173,7 +207,7 @@ export async function scanObfuscation(pkgDir: string): Promise<ScannerResult> {
     }
 
     // String array rotation (check whole file content)
-    if (STRING_ARRAY_PATTERN.test(content)) {
+    if (hasLargeStringArray(content)) {
       findings.push({
         scanner: SCANNER_NAME,
         severity: 'critical',

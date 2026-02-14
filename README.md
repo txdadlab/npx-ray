@@ -65,7 +65,7 @@ Source Diff
   ✅ Source matches published package
 
 ───────────────────────────────────────────────────────
-  Verdict: CLEAN — Safe to install
+  Verdict: CLEAN — No issues detected
 ───────────────────────────────────────────────────────
 
 Scan completed in 3.2s
@@ -117,11 +117,11 @@ Source Diff deductions: -5 per unexpected file in the npm package that is not in
 
 | Grade | Score | Verdict | Exit Code |
 |---|---|---|---|
-| **A** | 90 -- 100 | CLEAN -- Safe to install | 0 |
-| **B** | 80 -- 89 | CLEAN -- Safe to install | 0 |
+| **A** | 90 -- 100 | CLEAN -- No issues detected | 0 |
+| **B** | 80 -- 89 | CLEAN -- No issues detected | 0 |
 | **C** | 70 -- 79 | CAUTION -- Review findings before installing | 1 |
-| **D** | 60 -- 69 | RISKY -- Manual review strongly recommended | 2 |
-| **F** | 0 -- 59 | RISKY -- Manual review strongly recommended | 2 |
+| **D** | 60 -- 69 | DANGER -- Manual review strongly recommended | 2 |
+| **F** | 0 -- 59 | DANGER -- Manual review strongly recommended | 2 |
 
 ---
 
@@ -250,7 +250,7 @@ The `--json` flag outputs a structured report that can be parsed by downstream t
   ],
   "score": 95,
   "grade": "A",
-  "verdict": "CLEAN — Safe to install",
+  "verdict": "CLEAN — No issues detected",
   "duration": 2100
 }
 ```

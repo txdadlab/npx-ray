@@ -312,7 +312,7 @@ describe('Scorer', () => {
 
     assert.ok(result.score < 60, `Score should be < 60, got ${result.score}`);
     assert.ok(result.grade === 'D' || result.grade === 'F', `Grade should be D or F, got ${result.grade}`);
-    assert.ok(result.verdict.includes('RISKY'));
+    assert.ok(result.verdict.includes('DANGER'));
   });
 
   it('should handle warning findings with smaller deduction', () => {

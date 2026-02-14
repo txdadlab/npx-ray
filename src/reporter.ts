@@ -67,7 +67,7 @@ function colorScore(score: number, grade: string): string {
 function colorVerdict(verdict: string): string {
   if (verdict.startsWith('CLEAN')) return chalk.green.bold(verdict);
   if (verdict.startsWith('CAUTION')) return chalk.yellow.bold(verdict);
-  if (verdict.startsWith('RISKY')) return chalk.red.bold(verdict);
+  if (verdict.startsWith('DANGER')) return chalk.red.bold(verdict);
   return chalk.bold(verdict);
 }
 

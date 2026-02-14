@@ -135,12 +135,12 @@ function toVerdict(grade: string): string {
   switch (grade) {
     case 'A':
     case 'B':
-      return 'CLEAN — Safe to install';
+      return 'CLEAN — No issues detected';
     case 'C':
       return 'CAUTION — Review findings before installing';
     case 'D':
     case 'F':
-      return 'RISKY — Manual review strongly recommended';
+      return 'DANGER — Manual review strongly recommended';
     default:
       return 'UNKNOWN';
   }

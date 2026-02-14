@@ -20,7 +20,10 @@ const GITHUB_API = 'https://api.github.com';
 const USER_AGENT = 'npx-ray/1.0.0';
 
 /** Directories whose contents are expected build artifacts in npm packages. */
-const BUILD_DIR_PREFIXES = ['dist/', 'lib/', 'build/', '.next/', 'out/'];
+const BUILD_DIR_PREFIXES = [
+  'dist/', 'lib/', 'build/', '.next/', 'out/',
+  'prebuilds/', 'compiled/', 'esm/', 'cjs/',
+];
 
 /**
  * Files that commonly differ between source and published package
@@ -138,22 +141,29 @@ function isExpectedBuildFile(
     }
   }
 
-  // Check if it's a compiled JS file with a corresponding TS source
-  if (extname(filePath) === '.js') {
-    const tsCounterpart = filePath.replace(/\.js$/, '.ts');
-    const tsxCounterpart = filePath.replace(/\.js$/, '.tsx');
-    if (repoFiles.has(tsCounterpart) || repoFiles.has(tsxCounterpart)) {
+  // Check if it's a compiled JS/MJS/CJS file with a corresponding TS source
+  const ext = extname(filePath);
+  if (ext === '.js' || ext === '.mjs' || ext === '.cjs') {
+    const base = filePath.replace(/\.(js|mjs|cjs)$/, '');
+    if (repoFiles.has(base + '.ts') || repoFiles.has(base + '.tsx') ||
+        repoFiles.has(base + '.mts') || repoFiles.has(base + '.cts') ||
+        repoFiles.has('src/' + base + '.ts') || repoFiles.has('src/' + base + '.tsx')) {
       return true;
     }
   }
 
-  // .d.ts declaration files are build artifacts
-  if (filePath.endsWith('.d.ts') || filePath.endsWith('.d.ts.map')) {
+  // TypeScript declaration files are always build artifacts
+  if (filePath.endsWith('.d.ts') || filePath.endsWith('.d.mts') || filePath.endsWith('.d.cts')) {
     return true;
   }
 
-  // .js.map source maps are build artifacts
-  if (filePath.endsWith('.js.map')) {
+  // Source maps are build artifacts
+  if (filePath.endsWith('.map')) {
+    return true;
+  }
+
+  // Native addon binaries (.node) are build artifacts
+  if (filePath.endsWith('.node')) {
     return true;
   }
 
