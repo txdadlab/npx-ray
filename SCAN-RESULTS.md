@@ -23,24 +23,34 @@ Scans performed **2026-02-14** against packages published within minutes of test
 
 **Publisher:** bangtepllo | **License:** MIT | **Files:** 10 | **Size:** 43.8 KB
 
-**Why it's suspicious:** Obfuscated Telegram bot manager with no description, embedded credentials, and IP geolocation fingerprinting. Classic malware reconnaissance pattern.
+**Initial assessment:** Obfuscated Telegram bot with no description, apparent embedded credentials, and IP geolocation API calls. Flagged as suspicious.
+
+**Post-deobfuscation verdict:** Not malware. It's an **Indonesian VPN reseller management bot** (Telegram-based) for provisioning SSH, VLESS, and ZIVPN accounts. The obfuscation is likely commercial code protection, not malicious intent.
 
 | Scanner | Result |
 |---|---|
 | Static | 1 warning: axios HTTP client |
-| Obfuscation | 1 critical (50+ element string array), 2 warnings (hex-encoded strings), 8 info (long lines up to 24,733 chars) |
-| Secrets | 1 critical: embedded credentials in URL |
-| IOC | 1 URL: `hxxp[://]ip-api[.]com/json/` (IP geolocation fingerprinting) |
+| Obfuscation | 1 critical (190-element string array), 2 warnings (hex-encoded strings), 8 info (long lines up to 24,733 chars) |
+| Secrets | 1 critical: false positive — SSH connection string template (`:443@`) matched credential-in-URL pattern |
+| IOC | 1 URL: `hxxp[://]ip-api[.]com/json/` (used to display server geolocation to admin, not victim fingerprinting) |
 | GitHub | No repository found |
 
-**Red flags:**
-- 24,733-character single-line source file (heavy minification/obfuscation)
-- Large string array rotation (>50 elements) — common JavaScript obfuscator output
+**Flags that triggered the score:**
+- 24,733-character single-line source file (heavy javascript-obfuscator output)
+- Large string array rotation (190 elements) — all strings resolved via deobfuscation
 - Hex-encoded string sequences hiding actual behavior
-- Embedded credentials in URL
-- IP geolocation API call (`ip-api.com/json/`) — used by malware to fingerprint victims
+- `:443@` and `:80@` patterns in SSH connection string templates (false positive for secrets scanner)
+- `ip-api.com/json/` called to look up VPN server locations for admin display
 - No GitHub repository, no package description
-- **Reported to npm security** (see Reporting section below)
+
+**Deobfuscation details:**
+- String array extracted and rotation function executed in isolation (no bot code executed)
+- All 190 strings recovered — UI is in Indonesian (Bahasa Indonesia)
+- Bot reads `BOT_TOKEN` and `ADMIN_ID` from env, restricts access to admin only
+- Creates VPN accounts via `http://{domain}:1000/create-{protocol}?username=...&password=...`
+- Manages servers in local SQLite database
+- Supports SSH, VLESS, ZIVPN protocols with TLS/gRPC/non-TLS variants
+- See [blog post](blog/2026-02-14-catching-malware-in-real-time.md) for full analysis
 
 ---
 
@@ -191,8 +201,8 @@ Based on this live testing session:
 
 - **Obfuscation detection** correctly identified string array rotation, hex encoding, and minified single-line files
 - **Static analysis** caught all instances of `exec()`, `spawn()`, `child_process`, `fetch()`, and credential access patterns
-- **Secrets scanner** found embedded credentials in URLs
-- **IOC extraction** surfaced IP geolocation endpoints and C2-adjacent URLs with proper defanging
+- **Secrets scanner** found credential-like patterns in URLs (note: `bt-bot-vpn-tele-manager` finding was a false positive — SSH connection string template, not actual embedded credentials)
+- **IOC extraction** surfaced IP geolocation endpoints and URLs with proper defanging
 - **GitHub health** correctly flagged zero-star repos, new repos, and publisher/owner mismatches
 - **Source diff** caught files present in npm but missing from GitHub source
 - **Dependency analysis** flagged excessive dependency counts (>50)
@@ -200,5 +210,6 @@ Based on this live testing session:
 ### Limitations Observed
 
 - Packages already pulled by npm (replaced with `0.0.1-security`) cannot be analyzed — the malicious code is gone
-- The `bt-bot-vpn-tele-manager` obfuscation is detectable but the IOC scanner cannot decode the obfuscated URLs hidden behind the string array rotation (see Limitations section in README)
+- The `bt-bot-vpn-tele-manager` obfuscation was detectable but the IOC scanner could not decode strings hidden behind string array rotation (see Limitations section in README). Manual deobfuscation (extracting and running the rotation function in isolation) recovered all 190 strings and revealed the package is a benign VPN management bot, not malware — demonstrating that obfuscation flags require manual follow-up
+- The secrets scanner produced a false positive on SSH connection string templates (`:443@` matched the credential-in-URL pattern). This is expected behavior — pattern-based scanning will have edge cases
 - Very large packages (cowork-os at 155 MB) take longer to scan but complete successfully
