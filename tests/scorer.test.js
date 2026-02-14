@@ -158,14 +158,27 @@ describe('Scorer', () => {
     assert.equal(result.score, 85);
   });
 
-  it('should deduct for publisher not matching owner', () => {
+  it('should deduct less for publisher not matching owner with high stars', () => {
     const scanners = allCleanResults();
-    const github = goodGitHub();
+    const github = goodGitHub(); // 1000 stars
     github.publisherMatchesOwner = false;
 
     const result = calculateScore(scanners, github);
 
-    // GitHub: 15 - 10 (publisher mismatch) = 5
+    // GitHub: 15 - 3 (publisher mismatch, stars >= 100) = 12
+    // Total: 75 + 12 = 87
+    assert.equal(result.score, 87);
+  });
+
+  it('should deduct full amount for publisher not matching owner with low stars', () => {
+    const scanners = allCleanResults();
+    const github = goodGitHub();
+    github.stars = 50;
+    github.publisherMatchesOwner = false;
+
+    const result = calculateScore(scanners, github);
+
+    // GitHub: 15 - 10 (publisher mismatch, stars < 100) = 5
     // Total: 75 + 5 = 80
     assert.equal(result.score, 80);
   });
@@ -202,7 +215,7 @@ describe('Scorer', () => {
     assert.equal(result.grade, 'A');
   });
 
-  it('should deduct diff points for unexpected files', () => {
+  it('should deduct diff points for unexpected files with diminishing returns', () => {
     const scanners = allCleanResults();
     const github = goodGitHub();
     const diff = {
@@ -214,9 +227,26 @@ describe('Scorer', () => {
 
     const result = calculateScore(scanners, github, diff);
 
-    // Diff: 10 - 5*1 = 5
-    // Total: 75 + 15 + 5 = 95
-    assert.equal(result.score, 95);
+    // Diff: 10 - min(8, 3 * (1 + ln(1))) = 10 - 3 = 7
+    // Total: 75 + 15 + 7 = 97
+    assert.equal(result.score, 97);
+  });
+
+  it('should cap diff deduction for many unexpected files', () => {
+    const scanners = allCleanResults();
+    const github = goodGitHub();
+    const diff = {
+      performed: true,
+      unexpectedFiles: Array.from({ length: 35 }, (_, i) => `file${i}.js`),
+      expectedBuildFiles: [],
+      modifiedFiles: [],
+    };
+
+    const result = calculateScore(scanners, github, diff);
+
+    // Diff: 10 - min(8, 3 * (1 + ln(35))) = 10 - 8 = 2
+    // Total: 75 + 15 + 2 = 92
+    assert.ok(result.score >= 90, `Score with 35 unexpected files should still be >= 90 with clean scanners, got ${result.score}`);
   });
 
   it('should clamp score to 0 minimum', () => {
@@ -334,9 +364,36 @@ describe('Scorer', () => {
     const github = goodGitHub();
     const result = calculateScore(scanners, github);
 
-    // Static: 25 - 5 (warning) = 20
+    // Static: 25 - 5*(1+ln(1)) = 25 - 5 = 20
     // Total: 20+15+10+5+5+10+5+15 = 85
     assert.equal(result.score, 85);
+  });
+
+  it('should apply diminishing returns for many warnings', () => {
+    const scanners = allCleanResults();
+    // 10 warnings in static
+    const warnings = Array.from({ length: 10 }, (_, i) => ({
+      scanner: 'static',
+      severity: 'warning',
+      message: `fetch() call ${i}`,
+      file: `file${i}.js`,
+    }));
+    scanners[0] = {
+      name: 'static',
+      passed: false,
+      findings: warnings,
+      summary: 'Found warning patterns',
+    };
+
+    const github = goodGitHub();
+    const result = calculateScore(scanners, github);
+
+    // Diminishing returns: 5*(1+ln(10)) = 5*3.302 = 16.51
+    // Static: max(0, 25 - 16.51) ≈ 8.49
+    // Total: ~8.49 + 50 + 15 ≈ 73 (vs linear: 25-50=0 → total 65)
+    assert.ok(result.score > 70, `Score with 10 warnings should be > 70 thanks to diminishing returns, got ${result.score}`);
+    // Also verify it's better than linear (which would give 65)
+    assert.ok(result.score > 65, `Diminishing returns should improve score vs linear deduction`);
   });
 
   it('should map grades correctly', () => {
@@ -346,14 +403,56 @@ describe('Scorer', () => {
     const resultA = calculateScore(scanners, goodGitHub());
     assert.equal(resultA.grade, 'A');
 
-    // Score = 80 -> B
-    const github80 = goodGitHub();
-    github80.publisherMatchesOwner = false; // -10 -> 80
-    const resultB = calculateScore(scanners, github80);
+    // Publisher mismatch with 1000 stars: -3 -> score 87 -> B
+    const github87 = goodGitHub();
+    github87.publisherMatchesOwner = false;
+    const resultB = calculateScore(scanners, github87);
+    assert.equal(resultB.score, 87);
     assert.equal(resultB.grade, 'B');
 
     // Score = 75 -> C (no github)
     const resultC = calculateScore(scanners);
     assert.equal(resultC.grade, 'C');
+  });
+
+  it('should eliminate publisher mismatch penalty with trusted publisher provenance', () => {
+    const scanners = allCleanResults();
+    const github = goodGitHub();
+    github.publisherMatchesOwner = false;
+
+    // Without provenance: -3 (high stars) -> score 87
+    const withoutProv = calculateScore(scanners, github);
+    assert.equal(withoutProv.score, 87);
+
+    // With provenance: no penalty -> score 90
+    const meta = { trustedPublisher: { id: 'github' } };
+    const withProv = calculateScore(scanners, github, undefined, meta);
+    assert.equal(withProv.score, 90);
+  });
+
+  it('should eliminate publisher mismatch penalty even for low-star repos with provenance', () => {
+    const scanners = allCleanResults();
+    const github = goodGitHub();
+    github.stars = 10;
+    github.publisherMatchesOwner = false;
+
+    // Without provenance: -10 (low stars) -> score 80
+    const withoutProv = calculateScore(scanners, github);
+    assert.equal(withoutProv.score, 80);
+
+    // With provenance: no penalty -> score 90
+    const meta = { trustedPublisher: { id: 'github' } };
+    const withProv = calculateScore(scanners, github, undefined, meta);
+    assert.equal(withProv.score, 90);
+  });
+
+  it('should not affect score when publisher matches and has provenance', () => {
+    const scanners = allCleanResults();
+    const github = goodGitHub(); // publisherMatchesOwner = true
+
+    // Provenance with matching publisher — no change
+    const meta = { trustedPublisher: { id: 'github' } };
+    const result = calculateScore(scanners, github, undefined, meta);
+    assert.equal(result.score, 90);
   });
 });

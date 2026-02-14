@@ -171,4 +171,26 @@ const apiKey = process.env.API_KEY;
     assert.equal(result.passed, true);
     assert.equal(result.findings.length, 0);
   });
+
+  it('should skip test files and test directories', async () => {
+    const dir = join(tmpDir, 'with-tests');
+    await fs.mkdir(join(dir, '__tests__'), { recursive: true });
+    await fs.mkdir(join(dir, 'tests'), { recursive: true });
+    await fs.mkdir(join(dir, 'test'), { recursive: true });
+
+    // Write dangerous patterns in test files — should all be skipped
+    await fs.writeFile(join(dir, '__tests__', 'run.js'), 'eval("test code");');
+    await fs.writeFile(join(dir, 'tests', 'helper.js'), 'eval("test code");');
+    await fs.writeFile(join(dir, 'test', 'setup.js'), 'eval("test code");');
+    await fs.writeFile(join(dir, 'util.test.js'), 'eval("test code");');
+    await fs.writeFile(join(dir, 'util.spec.js'), 'eval("test code");');
+
+    // Write a clean source file — should be scanned
+    await fs.writeFile(join(dir, 'index.js'), 'const x = 1;\n');
+
+    const result = await scanStatic(dir);
+
+    assert.equal(result.passed, true);
+    assert.equal(result.findings.length, 0, 'Test files should be excluded from scanning');
+  });
 });

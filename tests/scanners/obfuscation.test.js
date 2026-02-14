@@ -44,7 +44,7 @@ console.log(doubled);
     await fs.mkdir(dir, { recursive: true });
 
     // Generate a high-entropy string (random-looking characters)
-    // Shannon entropy > 5.8 requires a diverse character distribution
+    // Shannon entropy > 6.2 requires a very diverse character distribution
     const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=[]{}|;:,.<>?/~`';
     let highEntropy = '';
     for (let i = 0; i < 2000; i++) {
@@ -53,7 +53,16 @@ console.log(doubled);
     // Shuffle to increase entropy
     highEntropy = highEntropy.split('').sort(() => Math.random() - 0.5).join('');
 
-    await fs.writeFile(join(dir, 'obfuscated.js'), `var _0x${highEntropy}`);
+    // Include hex escapes so it doesn't look like minified code
+    const hexPart = '\\x68\\x65\\x6c\\x6c\\x6f\\x20\\x77\\x6f\\x72\\x6c\\x64'.repeat(6);
+    // Split into multiple lines to avoid triggering looksMinified long-line heuristic
+    const lines = [];
+    for (let i = 0; i < highEntropy.length; i += 80) {
+      lines.push(highEntropy.slice(i, i + 80));
+    }
+    const content = `_0x${lines.join('\n')}\n${hexPart}`;
+
+    await fs.writeFile(join(dir, 'obfuscated.js'), content);
 
     const result = await scanObfuscation(dir);
 
@@ -144,5 +153,91 @@ atob(payload);
       f.message.toLowerCase().includes('entropy')
     );
     assert.equal(entropyFindings.length, 0, 'Should not flag entropy on tiny files');
+  });
+
+  it('should downgrade minified files to info instead of critical/warning', async () => {
+    const dir = join(tmpDir, 'minified');
+    await fs.mkdir(dir, { recursive: true });
+
+    // Create content that looks minified: long lines, JS keywords, high entropy
+    // but no hex escapes
+    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=[]{}|;:,.<>?/~`';
+    let filler = '';
+    for (let i = 0; i < 2000; i++) {
+      filler += chars[i % chars.length];
+    }
+    filler = filler.split('').sort(() => Math.random() - 0.5).join('');
+
+    // Include JS keywords to trigger looksMinified()
+    const content = `function minifiedBundle(){var a=1;const b=2;let c=3;if(a){return b}else{for(let i=0;i<c;i++){while(true){class X{}}}}export default function(){import("x")};typeof a;a instanceof b;${filler}}`;
+    await fs.writeFile(join(dir, 'bundle.min.js'), content);
+
+    const result = await scanObfuscation(dir);
+
+    const entropyFindings = result.findings.filter(f =>
+      f.message.toLowerCase().includes('entropy')
+    );
+    // If entropy is high enough to trigger, it should be info (not critical/warning)
+    for (const f of entropyFindings) {
+      assert.equal(f.severity, 'info', `Minified file entropy should be info, got ${f.severity}: ${f.message}`);
+    }
+  });
+
+  it('should downgrade readable string arrays to info (not critical)', async () => {
+    const dir = join(tmpDir, 'data-table');
+    await fs.mkdir(dir, { recursive: true });
+
+    // Create a file with a large array of readable keyword strings (like bundled parsers)
+    const keywords = Array.from({ length: 60 }, (_, i) =>
+      `"keyword${String.fromCharCode(65 + (i % 26))}Statement"`
+    ).join(',');
+    await fs.writeFile(join(dir, 'parser.js'), `var nodeTypes = [${keywords}];\n`);
+
+    const result = await scanObfuscation(dir);
+
+    const arrayFindings = result.findings.filter(f =>
+      f.message.includes('string array')
+    );
+    assert.ok(arrayFindings.length > 0, 'Should detect the large string array');
+    assert.equal(arrayFindings[0].severity, 'info', 'Readable string arrays should be info, not critical');
+    assert.ok(arrayFindings[0].message.includes('data table'), 'Should identify as data table');
+  });
+
+  it('should flag obfuscation-style string arrays as critical', async () => {
+    const dir = join(tmpDir, 'obfuscated-array');
+    await fs.mkdir(dir, { recursive: true });
+
+    // Create obfuscation pattern: _0x variable + array + rotation function
+    const strings = Array.from({ length: 60 }, (_, i) =>
+      `"\\x${(i+65).toString(16)}\\x${(i+66).toString(16)}\\x${(i+67).toString(16)}"`
+    ).join(',');
+    const code = `var _0x1a2b = [${strings}];\n(function(arr,d){var fn=function(n){while(--n){arr.push(arr.shift())}};fn(++d)})(_0x1a2b,0x1e3);\n`;
+    await fs.writeFile(join(dir, 'evil.js'), code);
+
+    const result = await scanObfuscation(dir);
+
+    const arrayFindings = result.findings.filter(f =>
+      f.message.includes('string array') && f.message.includes('obfuscation')
+    );
+    assert.ok(arrayFindings.length > 0, 'Should detect obfuscation-style string array');
+    assert.equal(arrayFindings[0].severity, 'critical', 'Obfuscation string arrays should be critical');
+  });
+
+  it('should skip test files in test directories', async () => {
+    const dir = join(tmpDir, 'with-tests');
+    await fs.mkdir(join(dir, '__tests__'), { recursive: true });
+
+    // High entropy content in a test file — should be skipped
+    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=[]{}|;:,.<>?/~`';
+    let highEntropy = '';
+    for (let i = 0; i < 2000; i++) {
+      highEntropy += chars[i % chars.length];
+    }
+    highEntropy = highEntropy.split('').sort(() => Math.random() - 0.5).join('');
+    await fs.writeFile(join(dir, '__tests__', 'obfuscated.js'), `var _0x${highEntropy}`);
+
+    const result = await scanObfuscation(dir);
+
+    assert.equal(result.findings.length, 0, 'Test files should be excluded from obfuscation scanning');
   });
 });

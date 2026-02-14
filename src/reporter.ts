@@ -71,9 +71,14 @@ function colorVerdict(verdict: string): string {
   return chalk.bold(verdict);
 }
 
-/** Capitalize the first letter of a scanner name for display. */
+/** Map scanner internal names to human-readable display names. */
+const SCANNER_DISPLAY_NAMES: Record<string, string> = {
+  ioc: 'Network References',
+};
+
+/** Get the display name for a scanner. */
 function scannerDisplayName(name: string): string {
-  return name.charAt(0).toUpperCase() + name.slice(1);
+  return SCANNER_DISPLAY_NAMES[name] ?? name.charAt(0).toUpperCase() + name.slice(1);
 }
 
 /**
@@ -126,7 +131,11 @@ export function reportPretty(report: ScanReport, verbose: boolean): string {
   const pkg = report.package;
   lines.push('');
   lines.push(chalk.bold('Package: ') + `${pkg.name}@${pkg.version}`);
-  lines.push(chalk.bold('Publisher: ') + (pkg.publisher || chalk.dim('unknown')));
+  const publisherLabel = pkg.publisher || chalk.dim('unknown');
+  const provenanceBadge = pkg.trustedPublisher
+    ? chalk.green(' (verified provenance)')
+    : '';
+  lines.push(chalk.bold('Publisher: ') + publisherLabel + provenanceBadge);
   lines.push(chalk.bold('Published: ') + (pkg.publishedAt || chalk.dim('unknown')));
   lines.push(chalk.bold('License: ') + (pkg.license || chalk.dim('none')));
   lines.push(chalk.bold('Files: ') + pkg.fileCount.toString());
@@ -165,7 +174,11 @@ export function reportPretty(report: ScanReport, verbose: boolean): string {
         lines.push(`    ${chalk.yellow('Repository is archived')}`);
       }
       if (!gh.publisherMatchesOwner) {
-        lines.push(`    ${chalk.yellow('npm publisher does not match GitHub owner')}`);
+        if (report.package.trustedPublisher) {
+          lines.push(`    ${chalk.green('npm publisher does not match GitHub owner (verified CI provenance)')} `);
+        } else {
+          lines.push(`    ${chalk.yellow('npm publisher does not match GitHub owner')}`);
+        }
       }
     }
   }

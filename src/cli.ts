@@ -117,7 +117,7 @@ async function scanPackage(
     }
 
     // Step 6: Calculate score
-    const { score, grade, verdict } = calculateScore(scanners, github, diff);
+    const { score, grade, verdict } = calculateScore(scanners, github, diff, meta);
 
     // Step 7: Build report
     const duration = Date.now() - startTime;

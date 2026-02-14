@@ -41,6 +41,7 @@ describe('IOC Scanner', () => {
     assert.equal(result.findings.length, 1);
     const f = result.findings[0];
     assert.equal(f.severity, 'info');
+    assert.ok(f.message.includes('External URL:'), 'Non-decoded URLs should use "External URL" label');
     assert.ok(f.message.includes('hxxps[://]evil[.]badsite[.]xyz/payload?q=1'));
   });
 
@@ -67,6 +68,7 @@ describe('IOC Scanner', () => {
 
     const result = await scanIoc(dir);
     assert.equal(result.findings.length, 1);
+    assert.ok(result.findings[0].message.includes('External IP:'), 'Non-decoded IPs should use "External IP" label');
     assert.ok(result.findings[0].message.includes('45[.]33[.]32[.]156'));
   });
 
@@ -92,6 +94,23 @@ describe('IOC Scanner', () => {
 
     const result = await scanIoc(dir);
     assert.equal(result.findings.length, 0);
+  });
+
+  it('should skip well-known SaaS and cloud domains', async () => {
+    const dir = join(tmpDir, 'saas-urls');
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(join(dir, 'config.js'), `
+      const sentry = "https://sentry.io/project/123";
+      const api = "https://api.anthropic.com/v1/messages";
+      const deploy = "https://vercel.com/dashboard";
+      const cdn = "https://cdn.jsdelivr.net/npm/pkg";
+      const stripe = "https://api.stripe.com/v1/charges";
+      const cloud = "https://us-east-1.amazonaws.com/bucket";
+      const openai = "https://api.openai.com/v1/chat";
+    `);
+
+    const result = await scanIoc(dir);
+    assert.equal(result.findings.length, 0, 'Well-known SaaS domains should be filtered');
   });
 
   it('should deduplicate repeated URLs', async () => {

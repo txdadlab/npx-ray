@@ -227,11 +227,18 @@ export async function fetchPackageMetadata(target: string): Promise<PackageMetad
     license = (lic as Record<string, unknown>).type as string || '';
   }
 
-  // Extract publisher info
+  // Extract publisher info and trusted publisher (provenance via OIDC)
   let publisher = '';
-  const npmUser = manifest._npmUser as Record<string, string> | undefined;
+  let trustedPublisher: { id: string } | undefined;
+  const npmUser = manifest._npmUser as Record<string, unknown> | undefined;
   if (npmUser?.name) {
-    publisher = npmUser.name;
+    publisher = npmUser.name as string;
+  }
+  if (npmUser?.trustedPublisher && typeof npmUser.trustedPublisher === 'object') {
+    const tp = npmUser.trustedPublisher as Record<string, unknown>;
+    if (tp.id && typeof tp.id === 'string') {
+      trustedPublisher = { id: tp.id };
+    }
   }
 
   // Extract publish date from the time field
@@ -260,5 +267,6 @@ export async function fetchPackageMetadata(target: string): Promise<PackageMetad
     optionalDependencies: (manifest.optionalDependencies as Record<string, string>) || {},
     scripts: (manifest.scripts as Record<string, string>) || {},
     maintainers,
+    trustedPublisher,
   };
 }

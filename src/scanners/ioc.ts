@@ -29,29 +29,168 @@ const IPV4_PATTERN = /\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]\d|\d)\.){3}(?:25[0-5]
 
 /** Domains/URLs to exclude (common, expected, non-suspicious). */
 const IGNORED_DOMAINS = [
+  // npm / Node ecosystem
   'registry.npmjs.org',
   'nodejs.org',
-  'github.com',
-  'raw.githubusercontent.com',
   'npmjs.com',
   'www.npmjs.com',
   'docs.npmjs.com',
+  'yarnpkg.com',
+  'pnpm.io',
+
+  // Code hosting / VCS
+  'github.com',
+  'raw.githubusercontent.com',
+  'gist.github.com',
+  'gitlab.com',
+  'bitbucket.org',
+
+  // Standards / specs
   'opensource.org',
   'spdx.org',
   'creativecommons.org',
-  'shields.io',
-  'img.shields.io',
-  'badge.fury.io',
   'www.w3.org',
   'schema.org',
   'json-schema.org',
   'tc39.es',
+  'ecma-international.org',
+  'whatwg.org',
+  'ietf.org',
+
+  // Documentation / reference
   'developer.mozilla.org',
+  'mozilla.org',
+  'wikipedia.org',
+  'en.wikipedia.org',
+  'stackoverflow.com',
+  'readthedocs.io',
+  'docs.rs',
+
+  // JS tooling / frameworks
   'eslint.org',
   'prettier.io',
   'jestjs.io',
   'typescriptlang.org',
   'www.typescriptlang.org',
+  'babeljs.io',
+  'webpack.js.org',
+  'vitejs.dev',
+  'rollupjs.org',
+  'esbuild.github.io',
+  'reactjs.org',
+  'react.dev',
+  'vuejs.org',
+  'angular.io',
+  'svelte.dev',
+  'nextjs.org',
+  'nuxt.com',
+  'deno.land',
+
+  // Cloud / SaaS / infrastructure
+  'googleapis.com',
+  'google.com',
+  'www.google.com',
+  'cloud.google.com',
+  'firebase.google.com',
+  'firebaseio.com',
+  'microsoft.com',
+  'azure.com',
+  'windows.net',
+  'amazonaws.com',
+  'aws.amazon.com',
+  'cloudflare.com',
+  'cloudflareinsights.com',
+  'heroku.com',
+  'digitalocean.com',
+  'vercel.com',
+  'netlify.com',
+  'netlify.app',
+  'railway.app',
+  'render.com',
+  'fly.io',
+  'supabase.com',
+  'supabase.co',
+
+  // AI / ML
+  'anthropic.com',
+  'openai.com',
+  'huggingface.co',
+  'cohere.com',
+
+  // Auth / identity
+  'auth0.com',
+  'okta.com',
+  'clerk.dev',
+  'clerk.com',
+
+  // Monitoring / analytics / services
+  'sentry.io',
+  'sentry.dev',
+  'datadog.com',
+  'newrelic.com',
+  'grafana.com',
+  'segment.com',
+  'mixpanel.com',
+  'amplitude.com',
+  'logflare.app',
+
+  // Payments / communication
+  'stripe.com',
+  'twilio.com',
+  'sendgrid.com',
+  'mailgun.com',
+  'postmarkapp.com',
+
+  // Productivity / collaboration
+  'linear.app',
+  'notion.com',
+  'notion.so',
+  'slack.com',
+  'discord.com',
+  'discord.gg',
+
+  // Social media
+  'x.com',
+  'twitter.com',
+  'facebook.com',
+  'linkedin.com',
+  'youtube.com',
+
+  // Package registries (non-npm)
+  'pypi.org',
+  'crates.io',
+  'rubygems.org',
+  'packagist.org',
+  'pkg.go.dev',
+  'mvnrepository.com',
+  'nuget.org',
+
+  // Container / CI
+  'docker.com',
+  'hub.docker.com',
+  'ghcr.io',
+  'circleci.com',
+  'travis-ci.org',
+  'travis-ci.com',
+
+  // Badges / shields
+  'shields.io',
+  'img.shields.io',
+  'badge.fury.io',
+  'badgen.net',
+  'codecov.io',
+  'coveralls.io',
+  'david-dm.org',
+  'snyk.io',
+
+  // CDNs
+  'unpkg.com',
+  'cdn.jsdelivr.net',
+  'cdnjs.cloudflare.com',
+  'esm.sh',
+  'skypack.dev',
+
+  // Localhost / reserved
   'localhost',
   '127.0.0.1',
   '0.0.0.0',
@@ -408,7 +547,7 @@ export async function scanIoc(pkgDir: string): Promise<ScannerResult> {
     const firstLoc = ioc.files[0];
     const label = ioc.decodedFrom
       ? `URL (${ioc.decodedFrom}-decoded)`
-      : 'URL';
+      : 'External URL';
     const evidenceParts: string[] = [];
     if (ioc.decodedFrom) evidenceParts.push(`Decoded from ${ioc.decodedFrom} obfuscation`);
     if (ioc.files.length > 1) evidenceParts.push(`Found in ${ioc.files.length} location(s)`);
@@ -426,7 +565,7 @@ export async function scanIoc(pkgDir: string): Promise<ScannerResult> {
     const firstLoc = ioc.files[0];
     const label = ioc.decodedFrom
       ? `IP (${ioc.decodedFrom}-decoded)`
-      : 'IP';
+      : 'External IP';
     const evidenceParts: string[] = [];
     if (ioc.decodedFrom) evidenceParts.push(`Decoded from ${ioc.decodedFrom} obfuscation`);
     if (ioc.files.length > 1) evidenceParts.push(`Found in ${ioc.files.length} location(s)`);
