@@ -20,18 +20,22 @@ interface Pattern {
   regex: RegExp;
   severity: Finding['severity'];
   message: string;
+  /** If true, severity is downgraded to 'info' when the package is a CLI tool. */
+  cliExpected?: boolean;
 }
 
 const PATTERNS: Pattern[] = [
-  // Code execution (critical)
+  // Code execution (critical) — eval/Function stay critical even for CLI tools
   { regex: /\beval\s*\(/, severity: 'critical', message: 'eval() call — arbitrary code execution' },
   { regex: /new\s+Function\s*\(/, severity: 'critical', message: 'new Function() — dynamic code generation' },
-  { regex: /\bchild_process\b/, severity: 'critical', message: 'child_process module — shell command execution' },
-  { regex: /\bexecSync\s*\(/, severity: 'critical', message: 'execSync() — synchronous shell command execution' },
-  { regex: /\bexecFile\s*\(/, severity: 'critical', message: 'execFile() — external program execution' },
-  { regex: /\bspawn\s*\(/, severity: 'critical', message: 'spawn() — child process creation' },
+
+  // Shell execution (critical, but expected for CLI tools)
+  { regex: /\bchild_process\b/, severity: 'critical', message: 'child_process module — shell command execution', cliExpected: true },
+  { regex: /\bexecSync\s*\(/, severity: 'critical', message: 'execSync() — synchronous shell command execution', cliExpected: true },
+  { regex: /\bexecFile\s*\(/, severity: 'critical', message: 'execFile() — external program execution', cliExpected: true },
+  { regex: /\bspawn\s*\(/, severity: 'critical', message: 'spawn() — child process creation', cliExpected: true },
   // exec() is checked separately to avoid matching execSync/execFile and regex .exec()
-  { regex: /(?<!\.)(?<!\w)exec\s*\(/, severity: 'critical', message: 'exec() — shell command execution' },
+  { regex: /(?<!\.)(?<!\w)exec\s*\(/, severity: 'critical', message: 'exec() — shell command execution', cliExpected: true },
 
   // Network calls (warning)
   { regex: /\bfetch\s*\(/, severity: 'warning', message: 'fetch() — network request' },
@@ -54,6 +58,20 @@ const PATTERNS: Pattern[] = [
   { regex: /\bfs\.\s*rm\b/, severity: 'warning', message: 'fs.rm — file system deletion' },
   { regex: /\bfs\.\s*unlink\b/, severity: 'warning', message: 'fs.unlink — file deletion' },
 ];
+
+/**
+ * Detect whether a package is a CLI tool by checking for a "bin" field
+ * in its package.json.
+ */
+async function isCli(pkgDir: string): Promise<boolean> {
+  try {
+    const raw = await fs.readFile(join(pkgDir, 'package.json'), 'utf-8');
+    const pkg = JSON.parse(raw);
+    return pkg.bin !== undefined && pkg.bin !== null;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Recursively collect all source files from a directory.
@@ -100,6 +118,9 @@ export async function scanStatic(pkgDir: string): Promise<ScannerResult> {
     };
   }
 
+  // CLI tools are expected to use child_process/exec/spawn — don't penalize them
+  const cliTool = await isCli(pkgDir);
+
   for (const filePath of sourceFiles) {
     const relPath = relative(pkgDir, filePath);
 
@@ -123,10 +144,18 @@ export async function scanStatic(pkgDir: string): Promise<ScannerResult> {
             }
           }
 
+          // Downgrade shell execution patterns for CLI tools
+          const severity = (cliTool && pattern.cliExpected)
+            ? 'info' as Finding['severity']
+            : pattern.severity;
+          const message = (cliTool && pattern.cliExpected)
+            ? `${pattern.message} (expected for CLI tool)`
+            : pattern.message;
+
           findings.push({
             scanner: SCANNER_NAME,
-            severity: pattern.severity,
-            message: pattern.message,
+            severity,
+            message,
             file: relPath,
             line: i + 1,
             evidence: line.trim().substring(0, 200),
@@ -149,7 +178,8 @@ export async function scanStatic(pkgDir: string): Promise<ScannerResult> {
     if (criticalCount > 0) parts.push(`${criticalCount} critical`);
     if (warningCount > 0) parts.push(`${warningCount} warning`);
     if (infoCount > 0) parts.push(`${infoCount} info`);
-    summary = `Found ${parts.join(', ')} pattern(s) across ${sourceFiles.length} files`;
+    const cliNote = cliTool ? ' (CLI tool — shell execution expected)' : '';
+    summary = `Found ${parts.join(', ')} pattern(s) across ${sourceFiles.length} files${cliNote}`;
   }
 
   return {
