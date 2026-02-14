@@ -23,6 +23,7 @@ const USER_AGENT = 'npx-ray/1.0.0';
 const BUILD_DIR_PREFIXES = [
   'dist/', 'lib/', 'build/', '.next/', 'out/',
   'prebuilds/', 'compiled/', 'esm/', 'cjs/',
+  'plugins/', 'internal/', 'vendor/', 'bin/',
 ];
 
 /**
@@ -164,6 +165,13 @@ function isExpectedBuildFile(
 
   // Native addon binaries (.node) are build artifacts
   if (filePath.endsWith('.node')) {
+    return true;
+  }
+
+  // Common generated files
+  const basename = filePath.split('/').pop() || '';
+  if (basename === 'THIRD-PARTY-NOTICES.md' || basename === 'NOTICES' ||
+      basename === 'LICENSE.md' || basename === 'CHANGELOG.md') {
     return true;
   }
 
