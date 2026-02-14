@@ -1,0 +1,61 @@
+{
+  "name": "npx-ray",
+  "version": "1.0.0",
+  "description": "X-ray vision for npm packages — security scanner that audits source code, detects obfuscation, and flags supply chain risks before you install",
+  "type": "module",
+  "main": "dist/cli.js",
+  "bin": {
+    "npx-ray": "dist/cli.js"
+  },
+  "files": [
+    "dist/**/*",
+    "data/**/*",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "node --test tests/**/*.test.ts --loader ts-node/esm",
+    "lint": "tsc --noEmit",
+    "scan": "node dist/cli.js"
+  },
+  "keywords": [
+    "npm",
+    "security",
+    "scanner",
+    "audit",
+    "supply-chain",
+    "mcp",
+    "obfuscation",
+    "malware",
+    "typosquatting",
+    "cli"
+  ],
+  "author": "txdadlab",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/txdadlab/npx-ray.git"
+  },
+  "homepage": "https://github.com/txdadlab/npx-ray#readme",
+  "bugs": {
+    "url": "https://github.com/txdadlab/npx-ray/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "chalk": "^5.4",
+    "commander": "^13",
+    "fastest-levenshtein": "^1.0",
+    "ora": "^8",
+    "semver": "^7",
+    "tar": "^7"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@types/semver": "^7",
+    "typescript": "^5.7"
+  }
+}
