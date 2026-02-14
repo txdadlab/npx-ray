@@ -30,11 +30,14 @@ function isTestFile(relPath: string): boolean {
 }
 
 /**
- * Heuristic: does the file look like minified or bundled code?
+ * Heuristic: does the file look like minified or bundled code (NOT obfuscated)?
  * Bundled/minified code has long lines and retains JS keywords.
  * Bundled parsers may also contain hex-encoded character tables —
- * that doesn't make them obfuscated. Obfuscation is detected separately
- * via string array rotation patterns.
+ * that doesn't make them obfuscated.
+ *
+ * However, JavaScript Obfuscator output also has long lines and keywords.
+ * The distinguishing feature is pervasive _0x variable naming — if the file
+ * is saturated with _0x identifiers, it's obfuscated, not minified.
  */
 function looksMinified(content: string): boolean {
   const lines = content.split('\n');
@@ -43,7 +46,15 @@ function looksMinified(content: string): boolean {
 
   // Check for JS keywords that survive minification/bundling
   const jsKeywords = /\b(function|return|var|let|const|if|else|for|while|class|export|import|typeof|instanceof)\b/;
-  return jsKeywords.test(content);
+  if (!jsKeywords.test(content)) return false;
+
+  // Check for pervasive _0x variable naming (JavaScript Obfuscator hallmark).
+  // A few _0x references could appear in bundled code that includes an
+  // obfuscated snippet, but if they saturate the file it's obfuscation.
+  const obfuscatorVars = content.match(/_0x[0-9a-fA-F]{2,}/g);
+  if (obfuscatorVars && obfuscatorVars.length > 20) return false;
+
+  return true;
 }
 
 /** Minimum file size to run entropy analysis (skip tiny files). */
@@ -127,13 +138,17 @@ function classifyStringArray(
   arrayStart: number,
   arrayEnd: number,
 ): StringArrayResult {
-  // Check for rotation pattern near the array (push + shift = obfuscation)
+  // Check for rotation pattern near the array (push + shift = obfuscation).
+  // The rotation IIFE can appear either before or after the array definition
+  // depending on the obfuscator variant.
   const windowAfter = content.slice(arrayEnd, arrayEnd + 500);
-  const hasRotation = /\.\s*push\s*\(/.test(windowAfter) && /\.\s*shift\s*\(/.test(windowAfter);
+  const windowBefore = content.slice(Math.max(0, arrayStart - 1000), arrayStart);
+  const rotationPattern = (w: string) => /\[\s*'push'\s*\]/.test(w) && /\[\s*'shift'\s*\]/.test(w)
+    || /\.\s*push\s*\(/.test(w) && /\.\s*shift\s*\(/.test(w);
+  const hasRotation = rotationPattern(windowAfter) || rotationPattern(windowBefore);
 
-  // Check for obfuscator-style variable name (_0x...) before the array
-  const windowBefore = content.slice(Math.max(0, arrayStart - 50), arrayStart);
-  const hasObfuscatorVar = /_0x[0-9a-fA-F]+\s*=\s*$/.test(windowBefore);
+  // Check for obfuscator-style variable names (_0x...) near the array
+  const hasObfuscatorVar = /_0x[0-9a-fA-F]+/.test(windowBefore) || /_0x[0-9a-fA-F]+/.test(windowAfter);
 
   // If rotation + obfuscator var name, definitely obfuscation
   if (hasRotation && hasObfuscatorVar) return 'obfuscated';
