@@ -28,6 +28,25 @@ npx-ray lodash
 
 ---
 
+## Transparency: We Scanned Ourselves
+
+We ran npx-ray against its own source code. The result: **45/100 (F) -- DANGER**. Here's why, and why that's expected.
+
+npx-ray's scanners detect dangerous patterns like `eval()`, `child_process`, `exec()`, and `-----BEGIN PRIVATE KEY-----` by searching for those strings in source code. But npx-ray's own detection rules *contain those exact strings* as regex patterns. The scanner flags its own signatures:
+
+| Scanner | Self-Flag | Why |
+|---|---|---|
+| Static Analysis | 10 critical, 20 warnings | `static.js` contains detection patterns for `eval()`, `exec()`, `spawn()`, etc. -- the scanner finds its own rules |
+| Secrets | 1 critical | `secrets.js` contains the regex `-----BEGIN.*PRIVATE KEY-----` as a detection pattern -- flagged as a private key |
+| Obfuscation | 2 warnings | `ioc.js` and `obfuscation.js` contain hex escape sequences used for pattern matching |
+| IOC | 1 IP | `ioc.js` contains the example IP `1.2.3.4` in its test ignore list |
+
+**This is the "who watches the watchmen" problem** -- any security tool that scans for dangerous patterns will inevitably contain those patterns in its own detection rules. This does not affect scanning of other packages. We publish this result for full transparency.
+
+Full source code: [github.com/txdadlab/npx-ray](https://github.com/txdadlab/npx-ray)
+
+---
+
 ## Example Output
 
 ```
