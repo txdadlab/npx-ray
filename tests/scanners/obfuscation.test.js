@@ -98,12 +98,12 @@ console.log(msg);
     const dir = join(tmpDir, 'base64');
     await fs.mkdir(dir, { recursive: true });
 
-    // Create a base64 blob > 500 chars
+    // Create a base64 blob > 500 chars — non-minified file
     const base64Blob = Buffer.from('A'.repeat(500)).toString('base64');
-    await fs.writeFile(join(dir, 'b64.js'), `
-var payload = "${base64Blob}";
-atob(payload);
-`);
+    // Keep lines short (except the blob) and avoid JS keywords so looksMinified() returns false
+    await fs.writeFile(join(dir, 'b64.js'),
+      `x = "${base64Blob}";\natob(x);\n`
+    );
 
     const result = await scanObfuscation(dir);
 

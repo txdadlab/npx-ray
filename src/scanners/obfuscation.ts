@@ -204,6 +204,9 @@ async function collectSourceFiles(dir: string): Promise<string[]> {
     const ext = extname(entry.name);
     if (!CODE_EXTENSIONS.has(ext)) continue;
 
+    // Skip TypeScript declaration files — they describe types, not runtime code
+    if (entry.name.endsWith('.d.ts') || entry.name.endsWith('.d.mts') || entry.name.endsWith('.d.cts')) continue;
+
     const parentPath = (entry as any).parentPath ?? (entry as any).path ?? dir;
     const fullPath = join(parentPath, entry.name);
     const relPath = relative(dir, fullPath);
@@ -244,10 +247,12 @@ export async function scanObfuscation(pkgDir: string): Promise<ScannerResult> {
       continue;
     }
 
+    // Check if file looks like minified/bundled code (used for multiple checks)
+    const minified = looksMinified(content);
+
     // Shannon entropy check (whole file)
     if (content.length >= MIN_ENTROPY_SIZE) {
       const entropy = shannonEntropy(content);
-      const minified = looksMinified(content);
 
       if (entropy >= ENTROPY_CRITICAL) {
         findings.push({
@@ -277,24 +282,29 @@ export async function scanObfuscation(pkgDir: string): Promise<ScannerResult> {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
 
-      // Hex-encoded strings
+      // Hex-encoded strings — downgrade to info in minified/bundled files
+      // since bundled parsers often contain unicode tables as hex sequences
       if (HEX_PATTERN.test(line)) {
         findings.push({
           scanner: SCANNER_NAME,
-          severity: 'warning',
-          message: 'Hex-encoded string sequences detected',
+          severity: minified ? 'info' : 'warning',
+          message: minified
+            ? 'Hex-encoded string sequences detected (in bundled code)'
+            : 'Hex-encoded string sequences detected',
           file: relPath,
           line: i + 1,
           evidence: line.trim().substring(0, 200),
         });
       }
 
-      // Base64 blobs
+      // Base64 blobs — downgrade to info in minified/bundled files
       if (BASE64_PATTERN.test(line)) {
         findings.push({
           scanner: SCANNER_NAME,
-          severity: 'warning',
-          message: 'Large base64-encoded blob (>500 chars)',
+          severity: minified ? 'info' : 'warning',
+          message: minified
+            ? 'Large base64-encoded blob (>500 chars) (in bundled code)'
+            : 'Large base64-encoded blob (>500 chars)',
           file: relPath,
           line: i + 1,
           evidence: line.trim().substring(0, 200),

@@ -33,42 +33,71 @@ interface Pattern {
   message: string;
   /** If true, severity is downgraded to 'info' when the package is a CLI tool. */
   cliExpected?: boolean;
+  /** If true, matches inside string literals or comments are downgraded to info.
+   *  Used for function-call patterns (eval, exec) that can appear in strings as
+   *  documentation or linter rule references. Not used for module-name patterns
+   *  (child_process, axios) which are always referenced as strings. */
+  checkStringContext?: boolean;
 }
 
 const PATTERNS: Pattern[] = [
   // Code execution (critical) — eval/Function stay critical even for CLI tools
-  { regex: /\beval\s*\(/, severity: 'critical', message: 'eval() call — arbitrary code execution' },
-  { regex: /new\s+Function\s*\(/, severity: 'critical', message: 'new Function() — dynamic code generation' },
+  { regex: /\beval\s*\(/, severity: 'critical', message: 'eval() call — arbitrary code execution', checkStringContext: true },
+  { regex: /new\s+Function\s*\(/, severity: 'critical', message: 'new Function() — dynamic code generation', checkStringContext: true, cliExpected: true },
 
   // Shell execution (critical, but expected for CLI tools)
   { regex: /\bchild_process\b/, severity: 'critical', message: 'child_process module — shell command execution', cliExpected: true },
-  { regex: /\bexecSync\s*\(/, severity: 'critical', message: 'execSync() — synchronous shell command execution', cliExpected: true },
-  { regex: /\bexecFile\s*\(/, severity: 'critical', message: 'execFile() — external program execution', cliExpected: true },
-  { regex: /\bspawn\s*\(/, severity: 'critical', message: 'spawn() — child process creation', cliExpected: true },
+  { regex: /\bexecSync\s*\(/, severity: 'critical', message: 'execSync() — synchronous shell command execution', cliExpected: true, checkStringContext: true },
+  { regex: /\bexecFile\s*\(/, severity: 'critical', message: 'execFile() — external program execution', cliExpected: true, checkStringContext: true },
+  { regex: /\bspawn\s*\(/, severity: 'critical', message: 'spawn() — child process creation', cliExpected: true, checkStringContext: true },
   // exec() is checked separately to avoid matching execSync/execFile and regex .exec()
-  { regex: /(?<!\.)(?<!\w)exec\s*\(/, severity: 'critical', message: 'exec() — shell command execution', cliExpected: true },
+  { regex: /(?<!\.)(?<!\w)exec\s*\(/, severity: 'critical', message: 'exec() — shell command execution', cliExpected: true, checkStringContext: true },
 
   // Network calls (warning)
-  { regex: /\bfetch\s*\(/, severity: 'warning', message: 'fetch() — network request' },
+  { regex: /\bfetch\s*\(/, severity: 'warning', message: 'fetch() — network request', checkStringContext: true },
   { regex: /\bhttp\.request\b/, severity: 'warning', message: 'http.request — network request' },
   { regex: /\bhttps\.request\b/, severity: 'warning', message: 'https.request — network request' },
   { regex: /\bXMLHttpRequest\b/, severity: 'warning', message: 'XMLHttpRequest — network request' },
   { regex: /\baxios\b/, severity: 'warning', message: 'axios — HTTP client' },
-  { regex: /\bgot\s*\(/, severity: 'warning', message: 'got() — HTTP client' },
+  { regex: /\bgot\s*\(/, severity: 'warning', message: 'got() — HTTP client', checkStringContext: true },
   { regex: /\bnode-fetch\b/, severity: 'warning', message: 'node-fetch — HTTP client' },
   { regex: /\bundici\b/, severity: 'warning', message: 'undici — HTTP client' },
 
-  // Dynamic requires (warning) — require() with non-string-literal argument
-  { regex: /\brequire\s*\(\s*[^'"`\s]/, severity: 'warning', message: 'Dynamic require() — variable module path' },
+  // Dynamic requires (warning, but expected for CLI tools that load plugins/configs)
+  { regex: /\brequire\s*\(\s*[^'"`\s]/, severity: 'warning', message: 'Dynamic require() — variable module path', checkStringContext: true, cliExpected: true },
 
   // Env access (info)
   { regex: /\bprocess\.env\b/, severity: 'info', message: 'process.env access — environment variable read' },
 
-  // Dangerous fs operations (warning)
-  { regex: /\bfs\.\s*writeFile/, severity: 'warning', message: 'fs.writeFile — file system write' },
-  { regex: /\bfs\.\s*rm\b/, severity: 'warning', message: 'fs.rm — file system deletion' },
-  { regex: /\bfs\.\s*unlink\b/, severity: 'warning', message: 'fs.unlink — file deletion' },
+  // Dangerous fs operations (warning, but expected for CLI tools that write output/cache)
+  { regex: /\bfs\.\s*writeFile/, severity: 'warning', message: 'fs.writeFile — file system write', cliExpected: true },
+  { regex: /\bfs\.\s*rm\b/, severity: 'warning', message: 'fs.rm — file system deletion', cliExpected: true },
+  { regex: /\bfs\.\s*unlink\b/, severity: 'warning', message: 'fs.unlink — file deletion', cliExpected: true },
 ];
+
+/**
+ * Check whether a regex match at a given index falls inside a string literal
+ * or single-line comment. Walks the line tracking quote state.
+ * Returns true if the match is inside a string or comment (i.e. not real code).
+ */
+function isInsideStringOrComment(line: string, matchIndex: number): boolean {
+  let inString: string | null = null; // current quote char if inside string
+  for (let i = 0; i < matchIndex; i++) {
+    const ch = line[i];
+    if (inString) {
+      if (ch === '\\') { i++; continue; } // skip escaped char
+      if (ch === inString) { inString = null; }
+    } else {
+      if (ch === '"' || ch === "'" || ch === '`') {
+        inString = ch;
+      } else if (ch === '/' && line[i + 1] === '/') {
+        // Rest of line is a comment
+        return true;
+      }
+    }
+  }
+  return inString !== null;
+}
 
 /**
  * Detect whether a package is a CLI tool by checking for a "bin" field
@@ -96,6 +125,9 @@ async function collectSourceFiles(dir: string): Promise<string[]> {
 
     const ext = extname(entry.name);
     if (!CODE_EXTENSIONS.has(ext)) continue;
+
+    // Skip TypeScript declaration files — they describe types, not runtime code
+    if (entry.name.endsWith('.d.ts') || entry.name.endsWith('.d.mts') || entry.name.endsWith('.d.cts')) continue;
 
     // Build full path — entry.parentPath was added in Node 20, fall back to entry.path
     const parentPath = (entry as any).parentPath ?? (entry as any).path ?? dir;
@@ -144,11 +176,29 @@ export async function scanStatic(pkgDir: string): Promise<ScannerResult> {
     }
 
     const lines = content.split('\n');
+    let inBlockComment = false;
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
+
+      // Track block comment state (/* ... */) across lines
+      let lineInBlockComment = inBlockComment;
+      if (inBlockComment) {
+        if (line.includes('*/')) {
+          inBlockComment = false;
+        }
+      }
+      if (!lineInBlockComment) {
+        // Check if a block comment starts on this line (and doesn't close)
+        const stripped = line.replace(/\/\*[\s\S]*?\*\//g, ''); // remove inline /* */
+        if (/\/\*/.test(stripped)) {
+          inBlockComment = true;
+        }
+      }
+
       for (const pattern of PATTERNS) {
-        if (pattern.regex.test(line)) {
+        const match = pattern.regex.exec(line);
+        if (match) {
           // For exec(), avoid double-counting execSync/execFile
           if (pattern.message.startsWith('exec()')) {
             if (/\bexecSync\s*\(/.test(line) || /\bexecFile\s*\(/.test(line)) {
@@ -156,13 +206,27 @@ export async function scanStatic(pkgDir: string): Promise<ScannerResult> {
             }
           }
 
+          // For function-call patterns, check if the match is inside a string
+          // literal, single-line comment, or block comment. Pattern references
+          // in strings/comments (e.g., ESLint's no-eval rule describing "eval()")
+          // are not actual code execution. Not applied to module-name patterns
+          // (child_process, axios) which naturally appear as string arguments.
+          const inStringOrComment = pattern.checkStringContext
+            ? (lineInBlockComment || isInsideStringOrComment(line, match.index))
+            : false;
+
           // Downgrade shell execution patterns for CLI tools
-          const severity = (cliTool && pattern.cliExpected)
+          let severity = (cliTool && pattern.cliExpected)
             ? 'info' as Finding['severity']
             : pattern.severity;
-          const message = (cliTool && pattern.cliExpected)
+          let message = (cliTool && pattern.cliExpected)
             ? `${pattern.message} (expected for CLI tool)`
             : pattern.message;
+
+          if (inStringOrComment && severity !== 'info') {
+            severity = 'info';
+            message = `${pattern.message} (in string/comment)`;
+          }
 
           findings.push({
             scanner: SCANNER_NAME,
