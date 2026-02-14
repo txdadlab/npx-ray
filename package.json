@@ -1,6 +1,6 @@
 {
   "name": "npx-ray",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "X-ray vision for npm packages — security scanner that audits source code, detects obfuscation, and flags supply chain risks before you install",
   "type": "module",
   "main": "dist/cli.js",
