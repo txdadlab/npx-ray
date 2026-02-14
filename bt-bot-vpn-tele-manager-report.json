@@ -1,0 +1,194 @@
+{
+  "package": {
+    "name": "bt-bot-vpn-tele-manager",
+    "version": "1.0.1",
+    "description": "",
+    "license": "MIT",
+    "publisher": "bangtepllo",
+    "publishedAt": "2026-02-14T15:12:58.458Z",
+    "tarballUrl": "https://registry.npmjs.org/bt-bot-vpn-tele-manager/-/bt-bot-vpn-tele-manager-1.0.1.tgz",
+    "repositoryUrl": "",
+    "homepage": "",
+    "fileCount": 10,
+    "unpackedSize": 44858,
+    "dependencies": {
+      "axios": "^1.13.4",
+      "dotenv": "^17.2.4",
+      "nodemon": "^3.1.11",
+      "sqlite": "^5.1.1",
+      "sqlite3": "^5.1.7",
+      "telegraf": "^4.16.3"
+    },
+    "optionalDependencies": {},
+    "scripts": {
+      "start": "nodemon src/index.js"
+    },
+    "maintainers": [
+      {
+        "name": "bangtepllo",
+        "email": "bangtepllo752@gmail.com"
+      }
+    ]
+  },
+  "scanners": [
+    {
+      "name": "static",
+      "passed": false,
+      "findings": [
+        {
+          "scanner": "static",
+          "severity": "warning",
+          "message": "axios — HTTP client",
+          "file": "src/index.js",
+          "line": 1,
+          "evidence": "const _0x2046d5=_0x1afa;(function(_0x567107,_0x516613){const _0x45a303=_0x1afa,_0x5c1834=_0x567107();while(!![]){try{const _0x358471=-parseInt(_0x45a303(0x15d))/0x1+parseInt(_0x45a303(0xff))/0x2*(-par"
+        }
+      ],
+      "summary": "Found 1 warning pattern(s) across 8 files"
+    },
+    {
+      "name": "obfuscation",
+      "passed": false,
+      "findings": [
+        {
+          "scanner": "obfuscation",
+          "severity": "warning",
+          "message": "Hex-encoded string sequences detected",
+          "file": "src/index.js",
+          "line": 1,
+          "evidence": "const _0x2046d5=_0x1afa;(function(_0x567107,_0x516613){const _0x45a303=_0x1afa,_0x5c1834=_0x567107();while(!![]){try{const _0x358471=-parseInt(_0x45a303(0x15d))/0x1+parseInt(_0x45a303(0xff))/0x2*(-par"
+        },
+        {
+          "scanner": "obfuscation",
+          "severity": "info",
+          "message": "Very long line (24733 chars) — possible minification without source maps",
+          "file": "src/index.js",
+          "line": 1
+        },
+        {
+          "scanner": "obfuscation",
+          "severity": "critical",
+          "message": "Large string array (>50 elements) — common obfuscation pattern",
+          "file": "src/index.js",
+          "evidence": "String array with 50+ elements detected"
+        },
+        {
+          "scanner": "obfuscation",
+          "severity": "warning",
+          "message": "Hex-encoded string sequences detected",
+          "file": "src/lib/database.js",
+          "line": 1,
+          "evidence": "(function(_0x2c1590,_0x17f3c5){const _0x18062e=_0xf996,_0x1d4524=_0x2c1590();while(!![]){try{const _0x1ddead=parseInt(_0x18062e(0xac))/0x1+-parseInt(_0x18062e(0xb2))/0x2+-parseInt(_0x18062e(0xb1))/0x3"
+        },
+        {
+          "scanner": "obfuscation",
+          "severity": "info",
+          "message": "Very long line (1689 chars) — possible minification without source maps",
+          "file": "src/lib/database.js",
+          "line": 1
+        },
+        {
+          "scanner": "obfuscation",
+          "severity": "info",
+          "message": "Very long line (2473 chars) — possible minification without source maps",
+          "file": "src/command/add_server.js",
+          "line": 1
+        },
+        {
+          "scanner": "obfuscation",
+          "severity": "info",
+          "message": "Very long line (2411 chars) — possible minification without source maps",
+          "file": "src/command/create_server.js",
+          "line": 1
+        },
+        {
+          "scanner": "obfuscation",
+          "severity": "info",
+          "message": "Very long line (2513 chars) — possible minification without source maps",
+          "file": "src/command/delete_server.js",
+          "line": 1
+        },
+        {
+          "scanner": "obfuscation",
+          "severity": "info",
+          "message": "Very long line (3759 chars) — possible minification without source maps",
+          "file": "src/command/info_bot.js",
+          "line": 1
+        },
+        {
+          "scanner": "obfuscation",
+          "severity": "info",
+          "message": "Very long line (2697 chars) — possible minification without source maps",
+          "file": "src/command/menu.js",
+          "line": 1
+        },
+        {
+          "scanner": "obfuscation",
+          "severity": "info",
+          "message": "Very long line (2427 chars) — possible minification without source maps",
+          "file": "src/command/start.js",
+          "line": 1
+        }
+      ],
+      "summary": "Obfuscation indicators: 1 critical, 2 warning, 8 info"
+    },
+    {
+      "name": "hooks",
+      "passed": true,
+      "findings": [],
+      "summary": "No lifecycle hooks found"
+    },
+    {
+      "name": "secrets",
+      "passed": false,
+      "findings": [
+        {
+          "scanner": "secrets",
+          "severity": "critical",
+          "message": "Embedded credentials in URL",
+          "file": "src/index.js",
+          "line": 1,
+          "evidence": "http****443@"
+        }
+      ],
+      "summary": "Secrets found: 1 critical"
+    },
+    {
+      "name": "binaries",
+      "passed": true,
+      "findings": [],
+      "summary": "No binary files found"
+    },
+    {
+      "name": "dependencies",
+      "passed": true,
+      "findings": [],
+      "summary": "6 direct, 0 optional dependencies"
+    },
+    {
+      "name": "typosquatting",
+      "passed": true,
+      "findings": [],
+      "summary": "No similar popular package names"
+    },
+    {
+      "name": "ioc",
+      "passed": true,
+      "findings": [
+        {
+          "scanner": "ioc",
+          "severity": "info",
+          "message": "URL: hxxp[://]ip-api[.]com/json/",
+          "file": "src/index.js",
+          "line": 1,
+          "evidence": "Found in 2 location(s)"
+        }
+      ],
+      "summary": "1 URL(s) extracted (defanged)"
+    }
+  ],
+  "score": 50,
+  "grade": "F",
+  "verdict": "DANGER — Manual review strongly recommended",
+  "duration": 326
+}
